@@ -1,0 +1,38 @@
+# Virtual Environment
+Tolis_Env/
+venv/
+env/
+ENV/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Solutions output
+solutions/
+*.json
+
+# Environment variables
+.env
+
+# Temporary files
+*.tmp
+*.temp

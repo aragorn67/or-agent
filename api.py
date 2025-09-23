@@ -6,7 +6,9 @@ from io import BytesIO
 import base64
 import json
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 # plotting (server-friendly)
@@ -15,6 +17,11 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 import model  # your Pyomo/GLPK engine (model.py)
+
+# New agent system
+from agent.core import OptimizationAgent
+from config import config
+from schemas.requests import NaturalLanguageRequest, FileInputRequest
 
 
 # ---------- Pydantic Schemas ----------
@@ -46,7 +53,13 @@ class QARequest(BaseModel):
 
 # ---------- FastAPI App ----------
 
-app = FastAPI(title="Transport Optimization API", version="0.3.0")
+app = FastAPI(title="Optimization Agent API", version="1.0.0")
+
+# Initialize the optimization agent
+agent = OptimizationAgent(config.get_llm_client())
+
+# Mount static files for HTML frontend
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
 # ---------- Utilities ----------
@@ -288,3 +301,45 @@ def solve_transport_with_plots(req: TransportRequest):
             "shipments_matrix_png_b64": _b64(img2)
         }
     }
+
+
+# ---------- New Agent Endpoints ----------
+
+@app.get("/", response_class=HTMLResponse)
+def get_homepage():
+    """Serve the main HTML interface"""
+    html_path = Path("templates/index.html")
+    if html_path.exists():
+        return html_path.read_text()
+    return "<h1>Optimization Agent</h1><p>HTML interface not found. Use /docs for API.</p>"
+
+@app.post("/solve/natural")
+def solve_natural_language(req: NaturalLanguageRequest):
+    """Solve optimization problem from natural language description"""
+    return agent.solve_natural_language(req.description)
+
+@app.post("/solve/file")
+def solve_from_file(req: FileInputRequest):
+    """Solve optimization problem from text file"""
+    try:
+        file_path = Path(req.file_path)
+        if not file_path.exists():
+            raise HTTPException(status_code=404, detail=f"File not found: {req.file_path}")
+
+        description = file_path.read_text(encoding='utf-8')
+        return agent.solve_natural_language(description)
+
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error reading file: {str(e)}")
+
+@app.get("/agent/capabilities")
+def get_agent_capabilities():
+    """Get agent capabilities and supported problem types"""
+    return agent.get_capabilities()
+
+@app.post("/agent/classify")
+def classify_problem_only(req: NaturalLanguageRequest):
+    """Just classify problem type without solving"""
+    from solvers import list_problem_types
+    classification = agent.llm.classify_problem(req.description, list_problem_types())
+    return classification
