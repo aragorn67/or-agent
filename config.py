@@ -14,8 +14,8 @@ class Config:
 
     @classmethod
     def get_llm_client(cls):
-        """Factory method to get configured LLM client"""
-        from llm.ollama_client import OllamaClient
-        return OllamaClient(cls.OLLAMA_HOST, cls.OLLAMA_MODEL)
+        """Factory method to get enhanced LLM client with specialists"""
+        from llm.enhanced_client import EnhancedLLMClient
+        return EnhancedLLMClient(cls.OLLAMA_HOST, cls.OLLAMA_MODEL)
 
 config = Config()

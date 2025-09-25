@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Optimization Agent - Chat Interface</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: #f5f7fa;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Header */
+        .chat-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            text-align: center;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        .chat-header h1 {
+            margin: 0;
+            font-size: 24px;
+            font-weight: 600;
+        }
+
+        .chat-header p {
+            margin: 5px 0 0 0;
+            opacity: 0.9;
+            font-size: 14px;
+        }
+
+        /* Chat Container */
+        .chat-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            max-width: 800px;
+            margin: 0 auto;
+            width: 100%;
+            background: white;
+            box-shadow: 0 0 20px rgba(0,0,0,0.1);
+        }
+
+        /* Messages Area */
+        .messages-area {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        /* Message Bubbles */
+        .message {
+            display: flex;
+            margin-bottom: 15px;
+        }
+
+        .message.user {
+            justify-content: flex-end;
+        }
+
+        .message.agent {
+            justify-content: flex-start;
+        }
+
+        .message-bubble {
+            max-width: 70%;
+            padding: 12px 18px;
+            border-radius: 18px;
+            font-size: 14px;
+            line-height: 1.4;
+            word-wrap: break-word;
+        }
+
+        .message.user .message-bubble {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-bottom-right-radius: 5px;
+        }
+
+        .message.agent .message-bubble {
+            background: #f1f3f5;
+            color: #333;
+            border-bottom-left-radius: 5px;
+            border: 1px solid #e9ecef;
+        }
+
+        .message-avatar {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            margin: 0 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 14px;
+        }
+
+        .message.user .message-avatar {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            order: 2;
+        }
+
+        .message.agent .message-avatar {
+            background: #28a745;
+            color: white;
+        }
+
+        /* Input Area */
+        .input-area {
+            padding: 20px;
+            background: white;
+            border-top: 1px solid #e9ecef;
+            display: flex;
+            gap: 10px;
+            align-items: flex-end;
+        }
+
+        .input-container {
+            flex: 1;
+            position: relative;
+        }
+
+        #messageInput {
+            width: 100%;
+            min-height: 44px;
+            max-height: 120px;
+            padding: 12px 50px 12px 16px;
+            border: 2px solid #e9ecef;
+            border-radius: 22px;
+            resize: none;
+            font-family: inherit;
+            font-size: 14px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        #messageInput:focus {
+            border-color: #667eea;
+        }
+
+        #sendButton {
+            position: absolute;
+            right: 8px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 32px;
+            height: 32px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            transition: transform 0.1s;
+        }
+
+        #sendButton:hover {
+            transform: translateY(-50%) scale(1.05);
+        }
+
+        #sendButton:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: translateY(-50%);
+        }
+
+        /* Typing Indicator */
+        .typing-indicator {
+            display: none;
+            padding: 10px;
+            font-style: italic;
+            color: #666;
+            font-size: 13px;
+        }
+
+        .typing-indicator.show {
+            display: block;
+        }
+
+        /* Welcome Message */
+        .welcome-message {
+            text-align: center;
+            padding: 40px 20px;
+            color: #666;
+        }
+
+        .welcome-message h2 {
+            margin-bottom: 10px;
+            color: #333;
+        }
+
+        .welcome-message p {
+            margin-bottom: 20px;
+        }
+
+        .quick-examples {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-top: 20px;
+        }
+
+        .example-button {
+            padding: 10px 15px;
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 10px;
+            cursor: pointer;
+            font-size: 13px;
+            transition: background-color 0.2s;
+        }
+
+        .example-button:hover {
+            background: #e9ecef;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .chat-container {
+                margin: 0;
+                height: 100vh;
+            }
+
+            .message-bubble {
+                max-width: 85%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="chat-header">
+        <h1>🧠 Optimization Agent</h1>
+        <p>Conversational optimization powered by AI</p>
+    </div>
+
+    <div class="chat-container">
+        <div class="messages-area" id="messagesArea">
+            <!-- Welcome message -->
+            <div class="welcome-message" id="welcomeMessage">
+                <h2>Welcome to your Optimization Agent!</h2>
+                <p>I can help you solve complex optimization problems through natural conversation.</p>
+
+                <div class="quick-examples">
+                    <div class="example-button" onclick="useExample(0)">
+                        💼 "Optimize shipping from 2 factories to 3 customers..."
+                    </div>
+                    <div class="example-button" onclick="useExample(1)">
+                        📊 "Show me the trade-offs between cost and delivery time"
+                    </div>
+                    <div class="example-button" onclick="useExample(2)">
+                        🔍 "What happens if I double my production capacity?"
+                    </div>
+                </div>
+            </div>
+
+            <!-- Typing indicator -->
+            <div class="typing-indicator" id="typingIndicator">
+                🤖 Agent is thinking...
+            </div>
+        </div>
+
+        <div class="input-area">
+            <div class="input-container">
+                <textarea
+                    id="messageInput"
+                    placeholder="Describe your optimization problem..."
+                    rows="1"
+                ></textarea>
+                <button id="sendButton" type="button">➤</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Example messages
+        const examples = [
+            "I need to optimize shipping costs. I have 2 factories (Seattle: 350 capacity, San Diego: 600 capacity) and 3 customers (New York: 325 demand, Chicago: 300 demand, Topeka: 275 demand). Shipping costs $90 per case per 1000 miles.",
+            "Show me the Pareto front between cost and delivery time for my transportation problem",
+            "What happens if I increase Seattle's capacity to 500 units?"
+        ];
+
+        // DOM elements
+        const messageInput = document.getElementById('messageInput');
+        const sendButton = document.getElementById('sendButton');
+        const messagesArea = document.getElementById('messagesArea');
+        const welcomeMessage = document.getElementById('welcomeMessage');
+        const typingIndicator = document.getElementById('typingIndicator');
+
+        // Conversation state
+        let currentSessionId = null;
+
+        // Auto-resize textarea
+        messageInput.addEventListener('input', function() {
+            this.style.height = 'auto';
+            this.style.height = this.scrollHeight + 'px';
+        });
+
+        // Send message on Enter (but not Shift+Enter)
+        messageInput.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+
+        // Send button click
+        sendButton.addEventListener('click', sendMessage);
+
+        // Use example message
+        function useExample(index) {
+            messageInput.value = examples[index];
+            messageInput.focus();
+            // Auto-resize
+            messageInput.style.height = 'auto';
+            messageInput.style.height = messageInput.scrollHeight + 'px';
+        }
+
+        // Add message to chat
+        function addMessage(content, type = 'user', data = null) {
+            // Hide welcome message after first user message
+            if (type === 'user' && welcomeMessage.style.display !== 'none') {
+                welcomeMessage.style.display = 'none';
+            }
+
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${type}`;
+
+            const avatar = document.createElement('div');
+            avatar.className = 'message-avatar';
+            avatar.textContent = type === 'user' ? '👤' : '🤖';
+
+            const bubble = document.createElement('div');
+            bubble.className = 'message-bubble';
+
+            if (type === 'agent' && data && (data.plots || data.plot_urls || data.has_plots)) {
+                // Handle plots and rich content
+                bubble.innerHTML = content;
+
+                // Handle base64 plots (legacy support)
+                if (data.plots) {
+                    Object.values(data.plots).forEach(plotBase64 => {
+                        const img = document.createElement('img');
+                        img.src = `data:image/png;base64,${plotBase64}`;
+                        img.style.maxWidth = '100%';
+                        img.style.marginTop = '10px';
+                        img.style.borderRadius = '8px';
+                        bubble.appendChild(img);
+                    });
+                }
+
+                // Handle plot URLs (new approach)
+                if (data.plot_urls || data.has_plots) {
+                    const plotUrls = data.plot_urls || {
+                        "shipments_by_plant": "/plots/shipments_by_plant.png",
+                        "shipments_matrix": "/plots/shipments_matrix.png"
+                    };
+
+                    Object.entries(plotUrls).forEach(([plotName, plotUrl]) => {
+                        const plotContainer = document.createElement('div');
+                        plotContainer.style.marginTop = '15px';
+                        plotContainer.style.textAlign = 'center';
+
+                        // Plot title
+                        const plotTitle = document.createElement('div');
+                        plotTitle.textContent = plotName.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+                        plotTitle.style.fontWeight = 'bold';
+                        plotTitle.style.marginBottom = '8px';
+                        plotTitle.style.color = '#333';
+                        plotContainer.appendChild(plotTitle);
+
+                        // Image element
+                        const img = document.createElement('img');
+                        img.src = plotUrl + '?t=' + Date.now(); // Add cache busting
+                        img.style.maxWidth = '100%';
+                        img.style.borderRadius = '8px';
+                        img.style.boxShadow = '0 2px 8px rgba(0,0,0,0.1)';
+                        img.style.backgroundColor = 'white';
+
+                        // Loading state
+                        img.style.opacity = '0.5';
+                        img.onload = () => {
+                            img.style.opacity = '1';
+                        };
+
+                        img.onerror = () => {
+                            img.style.display = 'none';
+                            const errorMsg = document.createElement('div');
+                            errorMsg.textContent = 'Failed to load plot';
+                            errorMsg.style.color = '#999';
+                            errorMsg.style.fontStyle = 'italic';
+                            plotContainer.appendChild(errorMsg);
+                        };
+
+                        plotContainer.appendChild(img);
+
+                        // Download button
+                        const downloadBtn = document.createElement('button');
+                        downloadBtn.textContent = '💾 Download';
+                        downloadBtn.style.marginTop = '8px';
+                        downloadBtn.style.padding = '6px 12px';
+                        downloadBtn.style.backgroundColor = '#667eea';
+                        downloadBtn.style.color = 'white';
+                        downloadBtn.style.border = 'none';
+                        downloadBtn.style.borderRadius = '4px';
+                        downloadBtn.style.cursor = 'pointer';
+                        downloadBtn.style.fontSize = '12px';
+
+                        downloadBtn.onclick = () => downloadPlot(plotUrl, plotName + '.png');
+
+                        plotContainer.appendChild(downloadBtn);
+                        bubble.appendChild(plotContainer);
+                    });
+                }
+            } else {
+                bubble.textContent = content;
+            }
+
+            messageDiv.appendChild(avatar);
+            messageDiv.appendChild(bubble);
+            messagesArea.appendChild(messageDiv);
+
+            // Scroll to bottom
+            messagesArea.scrollTop = messagesArea.scrollHeight;
+        }
+
+        // Initialize conversation
+        async function initializeConversation() {
+            try {
+                const response = await fetch('/conversation/start', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    }
+                });
+
+                const result = await response.json();
+                currentSessionId = result.session_id;
+
+                console.log('Conversation started:', currentSessionId);
+            } catch (error) {
+                console.error('Failed to start conversation:', error);
+                addMessage('❌ Failed to initialize conversation. Using fallback mode.', 'agent');
+            }
+        }
+
+        // Send message function
+        async function sendMessage() {
+            const message = messageInput.value.trim();
+            if (!message) return;
+
+            // Initialize conversation if needed
+            if (!currentSessionId) {
+                await initializeConversation();
+            }
+
+            // Disable input
+            sendButton.disabled = true;
+            messageInput.disabled = true;
+
+            // Add user message
+            addMessage(message, 'user');
+
+            // Clear input
+            messageInput.value = '';
+            messageInput.style.height = 'auto';
+
+            // Show typing indicator
+            typingIndicator.classList.add('show');
+            messagesArea.scrollTop = messagesArea.scrollHeight;
+
+            try {
+                let result;
+
+                if (currentSessionId) {
+                    // Use conversation API
+                    const response = await fetch(`/conversation/${currentSessionId}/message`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ content: message })
+                    });
+
+                    const conversationResult = await response.json();
+                    result = conversationResult.response;
+                } else {
+                    // Fallback to old API
+                    const response = await fetch('/solve/natural', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ description: message })
+                    });
+
+                    result = await response.json();
+                }
+
+                // Hide typing indicator
+                typingIndicator.classList.remove('show');
+
+                // Format response based on type
+                let agentResponse = '';
+
+                if (result.is_follow_up) {
+                    // Handle follow-up responses
+                    if (result.success) {
+                        agentResponse = result.content || 'Follow-up processed successfully.';
+
+                        if (result.follow_up_type === 'modification') {
+                            agentResponse = `🔄 **Parameter Modification**\n\n${agentResponse}`;
+                            if (result.solution) {
+                                agentResponse += `\n\n**New Cost:** $${result.solution.objective_thousand_usd?.toFixed(2) || 'N/A'}k`;
+                            }
+                        } else if (result.follow_up_type === 'analysis') {
+                            agentResponse = `📊 **Analysis Results**\n\n${agentResponse}`;
+                        }
+                    } else {
+                        agentResponse = `❌ **Follow-up Error:** ${result.error}`;
+                        if (result.suggestion) {
+                            agentResponse += `\n\n💡 **Suggestion:** ${result.suggestion}`;
+                        }
+                    }
+                } else {
+                    // Handle new problem responses
+                    if (result.success) {
+                        agentResponse = `✅ **Solution Found!**\n\n`;
+                        agentResponse += `**Problem Type:** ${result.problem_type}\n`;
+                        if (result.solution?.objective_value || result.solution?.objective_thousand_usd) {
+                            const cost = result.solution.objective_value || result.solution.objective_thousand_usd;
+                            agentResponse += `**Total Cost:** ${cost}\n\n`;
+                        }
+                        if (result.explanation) {
+                            agentResponse += `**Explanation:**\n${result.explanation}`;
+                        }
+                    } else {
+                        agentResponse = `❌ **Error:** ${result.error}`;
+                        if (result.suggestion) {
+                            agentResponse += `\n\n💡 **Suggestion:** ${result.suggestion}`;
+                        }
+                    }
+                }
+
+                addMessage(agentResponse, 'agent', result);
+
+            } catch (error) {
+                typingIndicator.classList.remove('show');
+                addMessage(`❌ **Connection Error:** ${error.message}`, 'agent');
+            }
+
+            // Re-enable input
+            sendButton.disabled = false;
+            messageInput.disabled = false;
+            messageInput.focus();
+        }
+
+        // Download plot function
+        function downloadPlot(plotUrl, filename) {
+            const link = document.createElement('a');
+            link.href = plotUrl;
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        // Focus input on load and initialize conversation
+        window.addEventListener('load', async () => {
+            messageInput.focus();
+            await initializeConversation();
+        });
+    </script>
+</body>
+</html>

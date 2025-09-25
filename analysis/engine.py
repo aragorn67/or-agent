@@ -35,9 +35,12 @@ class AnalysisEngine:
                 # Solve with modified parameters
                 solution = solver.solve(modified_params)
 
+                # Get objective value from either field
+                objective_cost = solution.get("objective_value") or solution.get("objective_thousand_usd", 0)
+
                 results.append({
                     f"{variable}_value": float(test_value),
-                    "objective_cost": solution.get("objective_thousand_usd", 0),
+                    "objective_cost": objective_cost,
                     "status": solution.get("status", "UNKNOWN"),
                     "feasible": solution.get("status") == "OPTIMAL"
                 })
@@ -100,47 +103,78 @@ class AnalysisEngine:
         }
 
     def _get_variable_value(self, params: Dict, variable: str) -> float:
-        """Extract variable value from parameters"""
+        """Extract variable value from parameters - GENERIC approach"""
         variable = variable.lower()
 
-        # Check capacity values
-        if "capacity" in variable:
-            for plant, cap in params.get("capacity", {}).items():
-                if plant.lower() in variable:
-                    return float(cap)
+        # Handle capacity variables: capacity_plantname
+        if variable.startswith("capacity_"):
+            plant_name = variable.replace("capacity_", "")
+            return float(params.get("capacity", {}).get(plant_name, 0))
 
-        # Check demand values
-        if "demand" in variable:
-            for market, dem in params.get("demand", {}).items():
-                if market.lower() in variable:
-                    return float(dem)
+        # Handle demand variables: demand_marketname
+        elif variable.startswith("demand_"):
+            market_name = variable.replace("demand_", "")
+            return float(params.get("demand", {}).get(market_name, 0))
 
-        # Check freight
-        if "freight" in variable or "cost" in variable:
+        # Handle distance variables: distance_plant_market
+        elif variable.startswith("distance_"):
+            parts = variable.split("_")
+            if len(parts) >= 3:
+                plant = parts[1]
+                market = "_".join(parts[2:])
+                return float(params.get("distance", {}).get(plant, {}).get(market, 0))
+
+        # Handle freight
+        elif variable == "freight":
             return float(params.get("freight", 0))
 
         return None
 
     def _modify_parameter(self, params: Dict, variable: str, new_value: float) -> Dict:
-        """Modify a parameter value"""
+        """Modify a parameter value - GENERIC approach"""
         variable = variable.lower()
 
-        # Modify capacity
-        if "capacity" in variable:
-            for plant in params.get("capacity", {}):
-                if plant.lower() in variable:
-                    params["capacity"][plant] = new_value
+        # Handle capacity variables: capacity_plantname
+        if variable.startswith("capacity_"):
+            plant_name = variable.replace("capacity_", "")
+            capacity_dict = params.get("capacity", {})
+
+            # Find matching plant name (case insensitive)
+            actual_plant = None
+            for existing_plant in capacity_dict.keys():
+                if existing_plant.lower() == plant_name.lower():
+                    actual_plant = existing_plant
                     break
 
-        # Modify demand
-        elif "demand" in variable:
-            for market in params.get("demand", {}):
-                if market.lower() in variable:
-                    params["demand"][market] = new_value
+            if actual_plant:
+                params["capacity"][actual_plant] = new_value
+
+        # Handle demand variables: demand_marketname
+        elif variable.startswith("demand_"):
+            market_name = variable.replace("demand_", "")
+            demand_dict = params.get("demand", {})
+
+            # Find matching market name (case insensitive)
+            actual_market = None
+            for existing_market in demand_dict.keys():
+                if existing_market.lower() == market_name.lower():
+                    actual_market = existing_market
                     break
 
-        # Modify freight
-        elif "freight" in variable or "cost" in variable:
+            if actual_market:
+                params["demand"][actual_market] = new_value
+
+        # Handle distance variables: distance_plant_market
+        elif variable.startswith("distance_"):
+            parts = variable.split("_")
+            if len(parts) >= 3:
+                plant = parts[1]
+                market = "_".join(parts[2:])
+                if plant in params.get("distance", {}) and market in params["distance"][plant]:
+                    params["distance"][plant][market] = new_value
+
+        # Handle freight
+        elif variable == "freight":
             params["freight"] = new_value
 
         return params

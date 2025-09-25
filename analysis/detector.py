@@ -9,37 +9,29 @@ class AnalysisDetector:
         self.llm = llm_client
 
     def detect_analysis_requests(self, description: str) -> Dict[str, Any]:
-        """Use LLM to understand what analyses/plots the user wants"""
+        """Detect if user wants specific analysis OR if they explicitly don't want plots"""
 
         prompt = f"""
 Analyze this optimization problem description and detect if the user wants any additional analysis, plots, or visualizations:
 
 Problem Description: "{description}"
 
-Please identify:
-1. Does the user want plots, graphs, charts, or visualizations?
-2. What type of analysis do they want?
-   - Sensitivity analysis (how one variable affects outcomes)
-   - Pareto analysis (trade-offs between objectives)
-   - Scenario comparison (what-if analysis)
-   - Variable relationships (connections between factors)
-   - Other analysis types
-
-3. Which specific variables or factors should be analyzed?
-4. What relationships or effects do they want to explore?
+Look for requests like:
+- "show me plots/graphs/charts"
+- "sensitivity analysis"
+- "what-if analysis"
+- "visualize the results"
+- "how does X affect Y"
 
 Return ONLY valid JSON:
 {{
   "wants_analysis": true/false,
-  "analysis_types": ["sensitivity", "pareto", "scenario", "relationship"],
-  "variables": ["seattle", "capacity", "cost", "demand"],
   "requests": [
     {{
       "type": "sensitivity",
-      "description": "How Seattle capacity affects total cost",
-      "x_variable": "seattle_capacity",
-      "y_variable": "total_cost",
-      "plot_type": "line"
+      "description": "How capacity affects total cost",
+      "x_variable": "capacity",
+      "y_variable": "total_cost"
     }}
   ]
 }}
