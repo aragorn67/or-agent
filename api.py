@@ -8,7 +8,7 @@ import json
 
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 # plotting (server-friendly)
@@ -20,6 +20,8 @@ import model  # your Pyomo/GLPK engine (model.py)
 
 # New agent system
 from agent.core import OptimizationAgent
+from conversation.agent import ConversationalAgent
+from conversation.memory import conversation_memory
 from config import config
 from schemas.requests import NaturalLanguageRequest, FileInputRequest
 
@@ -55,8 +57,13 @@ class QARequest(BaseModel):
 
 app = FastAPI(title="Optimization Agent API", version="1.0.0")
 
-# Initialize the optimization agent
+# Initialize the optimization agents
 agent = OptimizationAgent(config.get_llm_client())
+conversational_agent = ConversationalAgent(config.get_llm_client())
+
+# Global variables to cache data for plot endpoints
+_cached_solution = None
+_cached_sensitivity_plot = None
 
 # Mount static files for HTML frontend
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -288,30 +295,74 @@ def plots_transport(req: QARequest):
 @app.post("/solve/transport/with_plots")
 def solve_transport_with_plots(req: TransportRequest):
     """
-    Solve the model and return solution + base64 PNG plots.
+    Solve the model and return solution + plot URLs for display.
     """
     params = req.dict()
     result = model.solve_transport(params)
-    img1 = _plot_shipments_by_plant(result)
-    img2 = _plot_shipments_matrix(result)
+
+    # Store solution globally for plot endpoints to access
+    global _cached_solution
+    _cached_solution = result
+
     return {
         "solution": result,
-        "plots": {
-            "shipments_by_plant_png_b64": _b64(img1),
-            "shipments_matrix_png_b64": _b64(img2)
+        "plot_urls": {
+            "shipments_by_plant": "/plots/shipments_by_plant.png",
+            "shipments_matrix": "/plots/shipments_matrix.png"
         }
     }
+
+@app.get("/plots/shipments_by_plant.png")
+def get_shipments_by_plant_plot():
+    """Return the shipments by plant plot as a PNG image."""
+    global _cached_solution
+    if not _cached_solution:
+        raise HTTPException(status_code=404, detail="No solution data available. Run /solve/transport/with_plots first.")
+
+    img_bytes = _plot_shipments_by_plant(_cached_solution)
+    return StreamingResponse(BytesIO(img_bytes), media_type="image/png")
+
+@app.get("/plots/shipments_matrix.png")
+def get_shipments_matrix_plot():
+    """Return the shipments matrix plot as a PNG image."""
+    global _cached_solution
+    if not _cached_solution:
+        raise HTTPException(status_code=404, detail="No solution data available. Run /solve/transport/with_plots first.")
+
+    img_bytes = _plot_shipments_matrix(_cached_solution)
+    return StreamingResponse(BytesIO(img_bytes), media_type="image/png")
+
+
+@app.get("/plots/sensitivity.png")
+def get_sensitivity_plot():
+    """Return the sensitivity analysis plot as a PNG image."""
+    global _cached_sensitivity_plot
+    if not _cached_sensitivity_plot:
+        raise HTTPException(status_code=404, detail="No sensitivity analysis data available. Request a sensitivity analysis first.")
+
+    # The cached plot is already in base64 format, so we need to decode it
+    import base64
+    img_bytes = base64.b64decode(_cached_sensitivity_plot)
+    return StreamingResponse(BytesIO(img_bytes), media_type="image/png")
 
 
 # ---------- New Agent Endpoints ----------
 
 @app.get("/", response_class=HTMLResponse)
 def get_homepage():
-    """Serve the main HTML interface"""
-    html_path = Path("templates/index.html")
+    """Serve the conversational chat interface"""
+    html_path = Path("templates/chat.html")
     if html_path.exists():
         return html_path.read_text()
-    return "<h1>Optimization Agent</h1><p>HTML interface not found. Use /docs for API.</p>"
+    return "<h1>Optimization Agent</h1><p>Chat interface not found. Use /docs for API.</p>"
+
+@app.get("/chat", response_class=HTMLResponse)
+def get_chat_interface():
+    """Serve the conversational chat interface"""
+    html_path = Path("templates/chat.html")
+    if html_path.exists():
+        return html_path.read_text()
+    return "<h1>Chat Interface</h1><p>Chat interface not found.</p>"
 
 @app.post("/solve/natural")
 def solve_natural_language(req: NaturalLanguageRequest):
@@ -343,3 +394,63 @@ def classify_problem_only(req: NaturalLanguageRequest):
     from solvers import list_problem_types
     classification = agent.llm.classify_problem(req.description, list_problem_types())
     return classification
+
+
+# ---------- Conversation Endpoints ----------
+
+@app.post("/conversation/start")
+def start_conversation():
+    """Start a new conversation session"""
+    session_id = conversation_memory.create_conversation()
+    welcome_message = "Hello! I'm your optimization agent. What problem can I help you solve today?"
+
+    conversation_memory.add_message(session_id, "assistant", welcome_message)
+
+    return {
+        "session_id": session_id,
+        "message": welcome_message,
+        "status": "started"
+    }
+
+@app.post("/conversation/{session_id}/message")
+def send_message(session_id: str, message: dict):
+    """Send message in conversation"""
+    user_message = message.get("content", "").strip()
+
+    if not user_message:
+        raise HTTPException(status_code=400, detail="Message content cannot be empty")
+
+    if session_id not in conversation_memory.conversations:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    try:
+        # Process message with conversational agent
+        result = conversational_agent.process_message(session_id, user_message)
+
+        return {
+            "session_id": session_id,
+            "response": result,
+            "timestamp": datetime.now().isoformat()
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error processing message: {str(e)}")
+
+@app.get("/conversation/{session_id}")
+def get_conversation(session_id: str):
+    """Get conversation history"""
+    conversation = conversation_memory.get_conversation(session_id)
+
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    return conversation
+
+@app.get("/conversations")
+def list_conversations():
+    """List all conversation sessions"""
+    sessions = conversation_memory.list_conversations()
+    return {
+        "sessions": sessions,
+        "count": len(sessions)
+    }

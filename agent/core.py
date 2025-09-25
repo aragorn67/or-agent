@@ -50,6 +50,17 @@ class OptimizationAgent:
             example_params = solver.get_example_params()
             params = self.llm.extract_parameters(description, problem_type, example_params)
 
+            # Check if LLM extraction failed
+            if "error" in params:
+                return {
+                    "success": False,
+                    "error": "Parameter extraction failed",
+                    "details": [params["error"]],
+                    "problem_type": problem_type,
+                    "confidence": confidence,
+                    "suggestion": "Please provide complete information including all factory names, capacities, customer names, demands, and distances between all factories and customers."
+                }
+
             update_progress("Validating parameters...", 55)
 
             # Step 4: Validate parameters
@@ -70,8 +81,8 @@ class OptimizationAgent:
 
             update_progress("Generating explanation...", 85)
 
-            # Step 6: Generate explanation
-            explanation = self.llm.explain_solution(solution, problem_type)
+            # Step 6: Generate explanation with original description for unit context
+            explanation = self.llm.explain_solution(solution, problem_type, description)
 
             update_progress("Checking for analysis requests...", 90)
 
@@ -179,6 +190,37 @@ class OptimizationAgent:
                                 "data": analysis_result,
                                 "plot_base64": plot_b64
                             })
+
+                elif analysis_type == "visualization":
+                    # Generate basic plots for the solution
+                    try:
+                        from api import _plot_shipments_by_plant, _plot_shipments_matrix, _b64
+
+                        # Get the last solution from memory
+                        solver = self._get_solver_for_params(params)
+                        if solver:
+                            solution = solver.solve(params)
+
+                            # Generate plots
+                            img1 = _plot_shipments_by_plant(solution)
+                            img2 = _plot_shipments_matrix(solution)
+
+                            results.append({
+                                "type": "shipments_by_plant",
+                                "description": "Shipments by Plant",
+                                "plot_base64": _b64(img1)
+                            })
+
+                            results.append({
+                                "type": "shipments_matrix",
+                                "description": "Shipments Matrix (Stacked)",
+                                "plot_base64": _b64(img2)
+                            })
+                    except Exception as e:
+                        results.append({
+                            "type": "error",
+                            "description": f"Failed to generate plots: {str(e)}"
+                        })
 
                 elif analysis_type == "scenario":
                     # Perform scenario comparison (simplified)
