@@ -1,5 +1,5 @@
 # test_run.py
-from model import solve_transport
+from solvers.transportation_solver import solve_transport
 
 params = {
     "plants": ["seattle", "san-diego"],

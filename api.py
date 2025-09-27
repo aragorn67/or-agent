@@ -16,7 +16,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-import model  # your Pyomo/GLPK engine (model.py)
+from solvers.transportation_solver import solve_transport
 
 # New agent system
 from agent.core import OptimizationAgent
@@ -176,7 +176,7 @@ def solve_transport(req: TransportRequest):
     Solve the transport model and return the solution (JSON-safe).
     """
     params = req.dict()
-    result = model.solve_transport(params)
+    result = solve_transport(params)
     return result
 
 
@@ -187,7 +187,7 @@ def solve_transport_and_save(req: SaveRequest):
     """
     params = req.dict()
     scenario_name = params.pop("scenario_name", None)
-    result = model.solve_transport(params)
+    result = solve_transport(params)
     saved_path = save_solution_to_file(result, scenario_name=scenario_name)
     return {"saved_to": saved_path, "solution": result}
 
@@ -298,7 +298,7 @@ def solve_transport_with_plots(req: TransportRequest):
     Solve the model and return solution + plot URLs for display.
     """
     params = req.dict()
-    result = model.solve_transport(params)
+    result = solve_transport(params)
 
     # Store solution globally for plot endpoints to access
     global _cached_solution

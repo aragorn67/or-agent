@@ -55,6 +55,10 @@ class EnhancedLLMClient(LLMClient):
         """Detect follow-up intent using base client"""
         return self.base_client.detect_follow_up_intent(new_message, conversation_context)
 
+    def _chat(self, system: str, user: str, json_mode: bool = False) -> str:
+        """Delegate core chat functionality to base client"""
+        return self.base_client._chat(system, user, json_mode)
+
     def extract_modification_parameters(self, user_request: str, original_params: Dict) -> Dict[str, Any]:
         """Route modification detection to appropriate specialist"""
 
