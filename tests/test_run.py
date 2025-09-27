@@ -1,6 +1,6 @@
 # test_run.py
 import json
-import model
+from solvers.transportation_solver import solve_transport
 
 params = {
     "plants": ["seattle", "san-diego"],
@@ -14,7 +14,7 @@ params = {
     "freight": 90
 }
 
-result = model.solve_transport(params)
+result = solve_transport(params)
 
 # Pretty print
 print("\n--- Solution Report ---")

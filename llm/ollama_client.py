@@ -154,7 +154,7 @@ class OllamaClient(LLMClient):
 
         return None  # OK
 
-    def explain_solution(self, solution: Dict, problem_type: str) -> str:
+    def explain_solution(self, solution: Dict, problem_type: str, original_description: str = "") -> str:
         system = "Explain the solution briefly, focusing on objective value and the key chosen decisions."
         user = f"Problem type: {problem_type}\nSolution JSON: {json.dumps(solution)}\nReturn 2-3 sentences."
         try:
@@ -191,6 +191,27 @@ Determine:
 1. Is this a follow-up request (references previous solution) or a new optimization problem?
 2. If follow-up, what type of analysis is requested?
 
+IMPORTANT: If there is a previous optimization solution in the context, almost ALL questions should be considered follow-ups unless they clearly describe a completely NEW optimization problem with different entities.
+
+Questions like "what types of analyses?", "what can you do?", "how many variables?", "what's the goal?" are ALWAYS follow-ups when there's a previous solution.
+
+CRITICAL: Distinguish between "question" and "analysis":
+
+Use "question" for ANY informational request including:
+- Problem structure: "what are we optimizing?", "what's the goal?", "what are we trying to maximize/minimize?"
+- Capabilities: "what can you do?", "what analyses?", "mathematical analysis"
+- Constraints/limitations: "what constraints?", "what limitations?", "what restrictions?"
+- Insights/information: "what insights?", "tell me about this", "insights about this problem"
+- Problem size: "how many variables/locations/entities?"
+
+Use "analysis" ONLY for explicit computational requests:
+- Sensitivity analysis: "how does X affect Y?", "impact of changing X"
+- Plots/visualizations: "show me graphs", "create charts"
+- Calculations: "compute the effect", "calculate sensitivity"
+- Comparisons: "compare scenarios", "what-if analysis with specific changes"
+
+When in doubt, choose "question" over "analysis".
+
 Return JSON:
 {{
   "is_follow_up": true/false,
@@ -201,10 +222,23 @@ Return JSON:
 }}
 
 Follow-up types:
-- "analysis": Questions like "how does X affect Y", sensitivity analysis, plots
-- "modification": Changing parameters ("what if capacity doubled?")
-- "question": Simple questions about existing solution ("what was the total cost?")
+- "analysis": Advanced analysis requests like "how does X affect Y", sensitivity analysis, plots, visualizations
+- "modification": Changing parameters ("what if we change X?", "double the Y")
+- "question": Basic questions about problem structure, capabilities, or simple facts (prefer this for informational questions)
 - "new_problem": Completely new optimization problem
+
+IMPORTANT: Use "question" for informational requests about the problem or capabilities:
+- Questions about objective function ("what are we minimizing?", "what's the goal?", "what are we trying to maximize?")
+- Questions about problem size ("how many variables?", "how many locations?", "how many cities?")
+- Questions about constraints ("what rules?", "what restrictions?", "what limitations?")
+- Questions about capabilities ("what types of analyses?", "what can you do?", "analysis options", "mathematical analysis")
+- General informational questions ("what insights?", "tell me about this problem")
+
+Only use "analysis" for requests that explicitly ask for:
+- Computations or calculations
+- Plots, charts, graphs, visualizations
+- "How does X affect Y" type sensitivity analysis
+- Performance comparisons or trade-offs
 
 Analysis types:
 - "sensitivity": Questions like "how does X affect Y", "impact of", "effect of"
@@ -212,6 +246,11 @@ Analysis types:
 - "scenario": What-if analysis with parameter changes
 - "visualization": Plots, charts, diagrams
 - "explanation": Clarification about solution
+
+Question types (basic problem info):
+- Problem structure: "what is the objective function?", "what are the constraints?", "how many variables?"
+- Capabilities: "what types of analyses can you provide?", "what can you do with this problem?"
+- Solution facts: "what was the total cost?", "which routes were used?", "what is being optimized?"
 """
 
         try:

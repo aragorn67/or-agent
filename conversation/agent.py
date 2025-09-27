@@ -180,6 +180,21 @@ class ConversationalAgent(OptimizationAgent):
             return response
 
         try:
+            # FALLBACK: Check if this should actually be a question (misclassified)
+            message_lower = user_message.lower()
+            question_indicators = [
+                "what insights", "give me insights", "tell me about",
+                "what can you tell me", "what information", "explain this",
+                "what can you do", "what are we trying", "what function",
+                "what limitations", "what restrictions", "what constraints",
+                "what's the goal", "what is the objective", "what are we optimizing",
+                "how many", "what types of analyses", "analysis options"
+            ]
+
+            if any(phrase in message_lower for phrase in question_indicators):
+                # This should be handled as a question, not analysis
+                return self._handle_solution_question(session_id, user_message, last_solution)
+
             # Check if this is a sensitivity analysis request
             if any(word in user_message.lower() for word in ["affect", "impact", "effect", "sensitivity"]):
                 return self._perform_sensitivity_analysis(session_id, user_message, last_solution, last_params)
@@ -218,20 +233,89 @@ class ConversationalAgent(OptimizationAgent):
             return response
 
     def _handle_solution_question(self, session_id: str, user_message: str, last_solution: Dict) -> Dict[str, Any]:
-        """Handle questions about the existing solution"""
+        """Handle questions about the existing solution using LLM categorization"""
 
-        # Use LLM to answer questions about the solution
+        # Use LLM to categorize the question and determine the best response type
+        question_type = self._categorize_question(user_message, last_solution)
+
+        if question_type == "capabilities":
+            return self._provide_capabilities_info(session_id, last_solution)
+        elif question_type == "objective":
+            return self._provide_objective_info(session_id, last_solution)
+        elif question_type == "dimensions":
+            return self._provide_problem_size_info(session_id, last_solution)
+        elif question_type == "constraints":
+            return self._provide_constraints_info(session_id, last_solution)
+        else:
+            # For general questions, use LLM to provide a custom answer
+            return self._provide_general_answer(session_id, user_message, last_solution)
+
+    def _categorize_question(self, user_message: str, last_solution: Dict) -> str:
+        """Use LLM to intelligently categorize the user's question"""
+
+        problem_type = last_solution.get('problem_type', 'optimization')
+
         prompt = f"""
-User is asking about this optimization solution: {user_message}
+Categorize this user question about a {problem_type.lower()} optimization problem:
 
-Solution data: {last_solution.get('solution', {})}
-Problem type: {last_solution.get('problem_type', 'Unknown')}
+User question: "{user_message}"
 
-Provide a helpful answer explaining the solution.
+Choose the BEST category from these options:
+
+1. "capabilities" - Questions about what analyses can be performed
+   Examples: "what types of analyses?", "what can you do?", "analysis options"
+
+2. "objective" - Questions about the optimization goal/objective function
+   Examples: "what are we minimizing?", "what's the goal?", "objective function"
+
+3. "dimensions" - Questions about problem size/scale
+   Examples: "how many variables?", "how many locations?", "problem size"
+
+4. "constraints" - Questions about rules/limitations/restrictions
+   Examples: "what constraints?", "what rules?", "limitations", "restrictions"
+
+5. "general" - Any other question about the problem or solution
+   Examples: "explain the solution", "what does this mean?", specific solution details
+
+Return ONLY the category name (capabilities, objective, dimensions, constraints, or general).
 """
 
         try:
-            explanation = self.llm._generate(prompt)
+            response = self.llm._chat("", prompt, json_mode=False).strip().lower()
+
+            # Validate response
+            valid_categories = ["capabilities", "objective", "dimensions", "constraints", "general"]
+            if response in valid_categories:
+                return response
+            else:
+                # If LLM gives invalid response, fall back to general
+                return "general"
+
+        except Exception:
+            # If LLM fails, fall back to general
+            return "general"
+
+    def _provide_general_answer(self, session_id: str, user_message: str, last_solution: Dict) -> Dict[str, Any]:
+        """Provide a general answer using LLM"""
+
+        context = self.memory.get_context(session_id)
+        last_params = context.get("last_params", {})
+
+        prompt = f"""
+Answer this question about an optimization problem:
+
+Question: "{user_message}"
+
+Problem type: {last_solution.get('problem_type', 'Unknown')}
+Solution data: {last_solution.get('solution', {})}
+Problem parameters: {last_params}
+
+Provide a clear, helpful answer. Focus on being informative and concise.
+If the question is about specific numbers or details, extract them from the data provided.
+"""
+
+        try:
+            explanation = self.llm._chat("", prompt, json_mode=False)
 
             response = {
                 "success": True,
@@ -546,3 +630,128 @@ Provide a helpful answer explaining the solution.
         except Exception:
             # If detection fails, assume it's a new problem to be safe
             return True
+
+    def _provide_capabilities_info(self, session_id: str, last_solution: Dict) -> Dict[str, Any]:
+        """Provide information about available analysis capabilities"""
+
+        content = f"📋 **Available Analysis Types**\n\n"
+        content += f"For your {last_solution.get('problem_type', 'optimization').lower()} problem, I can provide:\n\n"
+        content += f"🔍 **Sensitivity Analysis**\n"
+        content += f"• Ask: 'How does [parameter] affect [objective]?'\n"
+        content += f"• Example: 'How does capacity affect total cost?'\n\n"
+        content += f"📊 **Visualizations**\n"
+        content += f"• Ask: 'Show me plots/charts/graphs'\n"
+        content += f"• Displays solution flows and relationships\n\n"
+        content += f"🔄 **What-if Scenarios**\n"
+        content += f"• Ask: 'What if I change [parameter] to [value]?'\n"
+        content += f"• Example: 'What if I double the capacity?'\n\n"
+        content += f"❓ **Problem Questions**\n"
+        content += f"• 'What is the objective function?'\n"
+        content += f"• 'How many variables/entities are there?'\n"
+        content += f"• 'What are the constraints?'"
+
+        response = {
+            "success": True,
+            "content": content,
+            "is_follow_up": True,
+            "follow_up_type": "question"
+        }
+
+        self.memory.add_message(session_id, "assistant", content, response)
+        return response
+
+    def _provide_objective_info(self, session_id: str, last_solution: Dict) -> Dict[str, Any]:
+        """Provide information about the objective function"""
+
+        problem_type = last_solution.get('problem_type', 'Unknown')
+        solution = last_solution.get('solution', {})
+
+        if problem_type == "TRANSPORTATION":
+            objective_value = solution.get('objective_thousand_usd', 0)
+            content = f"🎯 **Objective Function**\n\n"
+            content += f"**Type:** Minimization problem\n"
+            content += f"**Goal:** Minimize total transportation cost\n"
+            content += f"**Current Value:** ${objective_value:.2f}k USD\n\n"
+            content += f"**What we're optimizing:**\n"
+            content += f"• Find the cheapest way to ship products\n"
+            content += f"• From production plants to customer markets\n"
+            content += f"• While respecting capacity and demand constraints"
+        else:
+            content = f"🎯 **Objective Function**\n\n"
+            content += f"**Problem Type:** {problem_type}\n"
+            content += f"**Current Solution Value:** {solution.get('objective', 'N/A')}\n\n"
+            content += f"This optimization problem seeks to find the best solution according to the defined objective."
+
+        response = {
+            "success": True,
+            "content": content,
+            "is_follow_up": True,
+            "follow_up_type": "question"
+        }
+
+        self.memory.add_message(session_id, "assistant", content, response)
+        return response
+
+    def _provide_problem_size_info(self, session_id: str, last_solution: Dict) -> Dict[str, Any]:
+        """Provide information about problem size/dimensions"""
+
+        context = self.memory.get_context(session_id)
+        last_params = context.get("last_params", {})
+        problem_type = last_solution.get('problem_type', 'Unknown')
+
+        content = f"📏 **Problem Dimensions**\n\n"
+
+        if problem_type == "TRANSPORTATION":
+            plants = last_params.get("plants", [])
+            markets = last_params.get("markets", [])
+            content += f"**Entities:**\n"
+            content += f"• Production plants: {len(plants)} ({', '.join(plants)})\n"
+            content += f"• Customer markets: {len(markets)} ({', '.join(markets)})\n"
+            content += f"• Decision variables: {len(plants) * len(markets)} (shipment amounts)\n"
+            content += f"• Constraints: {len(plants) + len(markets)} (capacity + demand)"
+        else:
+            content += f"**Problem Type:** {problem_type}\n"
+            content += f"**Variables:** Available in solution data\n"
+            content += f"**Constraints:** Problem-specific"
+
+        response = {
+            "success": True,
+            "content": content,
+            "is_follow_up": True,
+            "follow_up_type": "question"
+        }
+
+        self.memory.add_message(session_id, "assistant", content, response)
+        return response
+
+    def _provide_constraints_info(self, session_id: str, last_solution: Dict) -> Dict[str, Any]:
+        """Provide information about problem constraints"""
+
+        problem_type = last_solution.get('problem_type', 'Unknown')
+
+        content = f"⚖️ **Problem Constraints**\n\n"
+
+        if problem_type == "TRANSPORTATION":
+            content += f"**Supply Constraints:**\n"
+            content += f"• Each plant cannot ship more than its production capacity\n"
+            content += f"• Ensures we don't exceed what we can produce\n\n"
+            content += f"**Demand Constraints:**\n"
+            content += f"• Each market must receive at least its required demand\n"
+            content += f"• Ensures all customer needs are met\n\n"
+            content += f"**Non-negativity:**\n"
+            content += f"• All shipment quantities must be ≥ 0\n"
+            content += f"• Cannot ship negative amounts"
+        else:
+            content += f"**Problem Type:** {problem_type}\n"
+            content += f"**Constraints:** Problem-specific constraints apply\n"
+            content += f"These ensure the solution is feasible and realistic."
+
+        response = {
+            "success": True,
+            "content": content,
+            "is_follow_up": True,
+            "follow_up_type": "question"
+        }
+
+        self.memory.add_message(session_id, "assistant", content, response)
+        return response

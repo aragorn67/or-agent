@@ -57,7 +57,14 @@ Agent: "📊 Route Analysis... [displays flows and utilization]"
 
 ### **🔧 REMAINING TASKS (Phase 1 Completion):**
 
-**🚧 Parameter Modification System**
+**🚨 URGENT BUG FIX - Parameter Modification Detection (Priority: CRITICAL)**
+- **Issue**: "What if I double the capacity?" incorrectly gets generic analysis response instead of parameter modification
+- **Root Cause**: Follow-up detection classifies modification requests as "analysis" instead of "modification"
+- **Impact**: Users cannot perform what-if scenarios, core feature broken
+- **Fix Required**: Improve LLM classification prompt for detecting parameter modification requests
+- **Timeline**: 1-2 days
+
+**🚧 Parameter Modification System Enhancement**
 - **What-if scenarios**: "What if freight costs doubled?" (basic working, needs refinement)
 - **Dynamic constraint addition**: "Athens cannot ship to Heraklion"
 - **Capacity/demand changes**: "Increase Seattle capacity to 500 units"
@@ -248,6 +255,73 @@ solvers/advanced/
 - **Code Generation**: Generate custom constraints in Python/Pyomo
 - **Mathematical Reasoning**: Enhanced mathematical problem understanding
 
+### **🎯 Specialized Question Analysis LLM (Priority: HIGH)**
+**Create a dedicated LLM specialized in understanding and categorizing user questions**
+
+#### **Core Capabilities:**
+- **Intent Recognition**: Distinguish between information requests vs computational analysis
+- **Question Type Classification**: Automatically categorize as capabilities/objective/dimensions/constraints/general
+- **Context Awareness**: Understand question context within conversation flow
+- **Ambiguity Resolution**: Handle unclear or ambiguous questions intelligently
+- **Multi-language Support**: Support questions in different languages and technical terminology
+
+#### **Architecture Benefits:**
+```python
+# Specialized question analysis pipeline:
+question_analyzer = QuestionAnalysisLLM()
+
+# Instead of current multi-step classification:
+# 1. Generic LLM detects follow-up type
+# 2. Another LLM categorizes questions
+# 3. Fallback mechanisms catch misclassifications
+
+# New streamlined approach:
+question_intent = question_analyzer.analyze(
+    question=user_message,
+    context=conversation_context,
+    problem_domain="transportation_optimization"
+)
+# Returns: {
+#   "category": "objective|capabilities|dimensions|constraints|general",
+#   "confidence": 0.95,
+#   "sub_category": "goal_clarification",
+#   "requires_computation": false,
+#   "context_dependencies": ["previous_solution"],
+#   "suggested_response_type": "structured_info"
+# }
+```
+
+#### **Training Approach:**
+- **Fine-tuned Model**: Specialized on optimization domain question patterns
+- **Domain Knowledge**: Trained on optimization terminology and concepts
+- **Question Classification Dataset**: Large dataset of categorized optimization questions
+- **Continuous Learning**: Improve based on user feedback and conversation outcomes
+
+#### **Implementation Plan:**
+```python
+# Specialized question analysis system:
+llm/specialized/
+├── question_analyzer.py         # Main question analysis LLM
+├── intent_classifier.py         # Deep intent understanding
+├── context_interpreter.py       # Conversation context analysis
+├── ambiguity_resolver.py        # Handle unclear questions
+├── training/
+│   ├── question_dataset.py      # Training data for question classification
+│   ├── domain_adapter.py        # Adapt model to optimization domain
+│   └── fine_tuning_pipeline.py  # Model training pipeline
+└── evaluation/
+    ├── accuracy_tester.py       # Test classification accuracy
+    ├── edge_case_validator.py   # Validate on difficult cases
+    └── performance_monitor.py   # Monitor real-world performance
+```
+
+#### **Expected Benefits:**
+- **Eliminate Classification Inconsistency**: No more LLM variability between runs
+- **Handle Complex Edge Cases**: Better understanding of nuanced questions
+- **Reduce Fallback Dependencies**: Fewer misclassifications requiring fallbacks
+- **Scale to New Domains**: Easy adaptation to new optimization problem types
+- **Improve User Experience**: More accurate and faster question understanding
+
 ### **Implementation Plan:**
 ```python
 # Enhanced LLM capabilities:
@@ -256,7 +330,11 @@ llm/advanced/
 ├── chain_of_thought.py          # Multi-step reasoning
 ├── tool_calling.py              # Function calling interface
 ├── code_generator.py            # Generate optimization code
-└── math_reasoner.py             # Mathematical problem decomposition
+├── math_reasoner.py             # Mathematical problem decomposition
+└── specialized/                 # NEW: Specialized question analysis
+    ├── question_analyzer.py     # Dedicated question understanding LLM
+    ├── intent_classifier.py     # Advanced intent recognition
+    └── context_interpreter.py   # Conversation context analysis
 ```
 
 ---
