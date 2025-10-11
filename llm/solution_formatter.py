@@ -27,9 +27,10 @@ class SolutionFormatter:
         llm_explanation = None
         if self.llm_client:
             try:
-                # Use concise prompt
-                prompt = self.explanation_guard.create_concise_prompt(problem_type)
-                raw_explanation = self.llm_client._generate(prompt + f"\n\nSolution data: {solution}")
+                # Use concise prompt with _chat method (not _generate which doesn't exist)
+                system = "You are a concise optimization solution explainer. Only state facts from the data."
+                user = self.explanation_guard.create_concise_prompt(problem_type) + f"\n\nSolution data: {solution}"
+                raw_explanation = self.llm_client._chat(system, user, json_mode=False)
 
                 # Filter for groundedness
                 llm_explanation = self.explanation_guard.filter_explanation(raw_explanation, solution)

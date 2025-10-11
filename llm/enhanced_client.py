@@ -3,6 +3,7 @@ from typing import Dict, Any, List
 from .client import LLMClient
 from .ollama_client import OllamaClient
 from .transportation_specialist import TransportationSpecialist
+from .problem_classifier import ProblemClassifier
 
 class EnhancedLLMClient(LLMClient):
     """Enhanced LLM client with problem-specific specialists"""
@@ -10,7 +11,8 @@ class EnhancedLLMClient(LLMClient):
     def __init__(self, host: str = "http://localhost:11434", model: str = "qwen2:7b"):
         self.base_client = OllamaClient(host, model)
 
-        # Initialize specialists
+        # Initialize classifier and specialists
+        self.classifier = ProblemClassifier(self.base_client)
         self.transportation = TransportationSpecialist(self.base_client)
 
         # Future specialists can be added here:
@@ -18,9 +20,21 @@ class EnhancedLLMClient(LLMClient):
         # self.assignment = AssignmentSpecialist(self.base_client)
         # self.knapsack = KnapsackSpecialist(self.base_client)
 
-    def classify_problem(self, description: str, problem_types: List[str]) -> Dict[str, Any]:
-        """Classify problem type using base client"""
-        return self.base_client.classify_problem(description, problem_types)
+    def classify_problem(self, description: str, problem_types: List[str] = None) -> Dict[str, Any]:
+        """Classify problem type using structured schema-based classifier"""
+        classification, votes = self.classifier.classify(description)
+
+        # Convert to legacy format for compatibility
+        legacy_format = {
+            "type": classification["problem_type"].upper(),
+            "confidence": classification["confidence"],
+            "signals": classification["signals"],
+            "evidence": classification["evidence"],
+            "reasoning": classification["why_short"],
+            "votes": votes  # Include all votes for debugging
+        }
+
+        return legacy_format
 
     def extract_parameters(self, description: str, problem_type: str, example: Dict) -> Dict[str, Any]:
         """Route to appropriate specialist based on problem type"""
@@ -40,8 +54,18 @@ class EnhancedLLMClient(LLMClient):
             # Fallback to base client for unsupported types
             return {"error": f"Problem type '{problem_type}' not yet supported by specialist handlers"}
 
-    def explain_solution(self, solution: Dict, problem_type: str, original_description: str = "") -> str:
-        """Generate clean, factual explanation with proper units"""
+    def explain_solution(self, solution: Dict, problem_type: str, original_description: str = "") -> Dict[str, Any]:
+        """
+        Generate clean, factual explanation with proper units.
+
+        Returns:
+            {
+                'summary': brief summary with units,
+                'explanation': detailed explanation,
+                'units_info': detected units (currency, distance, etc.),
+                'grounding_check': 'passed' or 'deterministic_fallback'
+            }
+        """
 
         from .solution_formatter import SolutionFormatter
 
@@ -49,7 +73,13 @@ class EnhancedLLMClient(LLMClient):
         formatter = SolutionFormatter(self.base_client)
         result = formatter.format_solution(solution, problem_type, original_description)
 
-        return result['explanation']
+        # Return full dict instead of just explanation string
+        return {
+            'summary': result.get('formatted_summary', ''),
+            'explanation': result.get('explanation', ''),
+            'units_info': result.get('units_info', {}),
+            'grounding_check': result.get('grounding_check', 'deterministic_fallback')
+        }
 
     def detect_follow_up_intent(self, new_message: str, conversation_context: Dict) -> Dict[str, Any]:
         """Detect follow-up intent using base client"""

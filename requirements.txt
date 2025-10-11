@@ -4,3 +4,4 @@ pydantic
 pyomo
 matplotlib
 requests
+jsonschema

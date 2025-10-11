@@ -1,0 +1,41 @@
+CLAUDE TODO - NEXT STEPS FOR LLM PROBLEM CLASSIFICATION AND MATH EXTRACTION
+
+Based on the roadmap update, to complete the "making the LLM able to distinguish problems and extract math" task, you need to work on these remaining items:
+
+## Immediate Remaining Tasks
+
+### 1. **Optimize Classification Performance**
+- Reduce voting from `n=3` to `n=1` in `problem_classifier.py` for faster response
+- Fine-tune model parameters for better speed/accuracy balance
+
+### 2. **Integrate Schema-Based Classifier into Conversation System**
+- Replace the complex prompt in `ollama_client.py:detect_follow_up_intent()`
+- Use structured classification to detect parameter modifications like "What if I double capacity?"
+- Update `conversation/agent.py` to use new classification system
+
+### 3. **Extend Parameter Modification Detection**
+- Leverage classification signals to better detect "what-if" scenarios
+- Improve detection of capacity changes, cost modifications, constraint additions
+- Use structured evidence to understand modification intent
+
+### 4. **Add Constraint Detection for Transportation**
+- Parse forbidden routes ("Antwerp cannot ship to Mons")
+- Detect capacity limits on specific arcs
+- Handle integer shipment requirements
+- Extract distance-based cost calculations
+
+## Critical Integration Points
+
+The **most important** remaining work is **#2**: integrating the schema classifier into your conversation system. This will fix the original "parameter modification detection bug" that was identified as critical in your roadmap.
+
+The current conversation system still uses the old complex prompt-based detection, but now you have a much better structured approach that can reliably distinguish between:
+- New optimization problems
+- Parameter modifications to existing problems
+- Analysis requests
+- Basic questions
+
+## Recommendation
+
+Start with optimizing performance (#1) or jump straight into the conversation integration (#2).
+
+Integration (#2) is the highest priority as it addresses the core issue that started this work: fixing parameter modification detection to properly handle user requests like "What if I double Seattle capacity?"
