@@ -1,0 +1,255 @@
+# OR Problem Classification Taxonomy
+# Hierarchical, stable taxonomy with 9 Level-1 families
+# Each entry has: definition, subtypes, examples, near_misses
+
+version: "1.0"
+last_updated: "2025-10-12"
+
+families:
+  network_flow:
+    definition: "Problems on directed/undirected graphs with flow conservation constraints at nodes, capacities on arcs, and network-based objectives."
+
+    subtypes:
+      min_cost_flow:
+        definition: "Network flow with costs on arcs; minimize total cost while satisfying supplies/demands."
+        examples:
+          - "Ship goods from factories (supply) to warehouses (demand) through a distribution network with shipping costs per route."
+          - "Transport oil through pipelines with per-barrel costs on each pipe segment."
+        near_misses:
+          - "Transportation problem without intermediate nodes (that's pure transportation, not network flow)"
+          - "Assignment with one-to-one matching (that's matching_assignment)"
+
+      max_flow:
+        definition: "Network flow with arc capacities; maximize flow from single source to single sink."
+        examples:
+          - "Water pipe network from reservoir to city with capacity limits on pipes."
+          - "Data transmission network maximizing throughput from server to client."
+        near_misses:
+          - "Min-cost-flow with costs (that's min_cost_flow)"
+          - "Multiple sources or sinks without aggregation (that's min_cost_flow)"
+
+      shortest_path:
+        definition: "Find minimum-cost path from source to sink in a weighted graph."
+        examples:
+          - "Find shortest route from City A to City Z through road network."
+          - "Minimize travel time through multi-hop network."
+        near_misses:
+          - "Traveling salesman visiting all nodes (that's a tour problem, could be mip)"
+          - "K shortest paths (still shortest_path subtype)"
+
+  matching_assignment:
+    definition: "Binary decision problems with one-to-one matching constraints between two disjoint sets."
+
+    subtypes:
+      assignment:
+        definition: "Assign N agents to N tasks (or unbalanced) with one-to-one matching; minimize total cost or maximize total benefit."
+        examples:
+          - "Assign 4 workers to 4 tasks where each worker has different costs for each task; minimize total cost."
+          - "Assign machines to jobs with processing times; each machine gets exactly one job."
+        near_misses:
+          - "Workers can be assigned to multiple tasks (that's not one-to-one, probably mip)"
+          - "Continuous flow amounts (that's network_flow or transportation)"
+
+      bipartite_matching:
+        definition: "Maximum cardinality or weighted bipartite matching."
+        examples:
+          - "Match applicants to jobs where each applicant can only accept one job; maximize total matches."
+        near_misses:
+          - "Assignment with costs on all pairs (that's assignment)"
+
+  location_allocation:
+    definition: "Decide which facilities to open (binary) and how to allocate customers to them."
+
+    subtypes:
+      facility_location:
+        definition: "Open subset of facilities with fixed opening costs; assign customers to minimize opening + transportation costs."
+        examples:
+          - "Choose which warehouses to open from 5 candidates; each has fixed cost and serves customers."
+          - "Locate distribution centers to serve stores at minimum total cost."
+        near_misses:
+          - "No fixed opening costs, just routing costs (that's min_cost_flow or transportation)"
+
+      p_median:
+        definition: "Choose exactly p facilities to open; minimize total weighted distance from customers to nearest facility."
+        examples:
+          - "Select exactly 3 distribution centers from 8 candidates to minimize customer distance."
+        near_misses:
+          - "Variable number of facilities with opening costs (that's facility_location)"
+
+      set_cover:
+        definition: "Select minimum-cost subset of sets to cover all elements."
+        examples:
+          - "Choose minimum number of fire stations to cover all neighborhoods."
+        near_misses:
+          - "Covering with capacity constraints (might be facility_location)"
+
+  lot_sizing:
+    definition: "Multi-period production planning with inventory holding and (optionally) setup costs; decide production quantities per period."
+
+    subtypes:
+      uncapacitated_lot_sizing:
+        definition: "Lot sizing without production capacity limits."
+        examples:
+          - "Plan production over 6 months with setup costs and holding costs; no capacity limit."
+        near_misses:
+          - "Capacitated production (that's capacitated_lot_sizing)"
+
+      capacitated_lot_sizing:
+        definition: "Lot sizing with production capacity constraints per period."
+        examples:
+          - "Produce widgets over 4 months with capacity 160 units/month and holding costs."
+        near_misses:
+          - "No time periods (that's just resource allocation, could be lp)"
+
+      multi_product_lot_sizing:
+        definition: "Lot sizing with multiple products sharing resources."
+        examples:
+          - "Produce Product A and B over 3 periods sharing 200 machine hours/period."
+        near_misses:
+          - "Single product (that's uncapacitated or capacitated lot_sizing)"
+
+  knapsack:
+    definition: "Select subset of items to maximize value subject to capacity/budget constraints."
+
+    subtypes:
+      zero_one_knapsack:
+        definition: "Each item can be selected at most once (binary decisions)."
+        examples:
+          - "Backpack with 50kg capacity; 5 items with weights and values; take 0 or 1 of each."
+          - "Investment selection: fund or don't fund each project; budget constraint."
+        near_misses:
+          - "Can take multiple copies (that's bounded or unbounded knapsack)"
+
+      bounded_knapsack:
+        definition: "Each item has an availability limit (can take 0 to b_i copies)."
+        examples:
+          - "Warehouse with capacity; products have limited availability; maximize value."
+        near_misses:
+          - "Unlimited copies (that's unbounded_knapsack)"
+
+      unbounded_knapsack:
+        definition: "Unlimited copies of each item type available."
+        examples:
+          - "Truck loading with unlimited supply of each box type."
+        near_misses:
+          - "Limited to one copy per item (that's zero_one_knapsack)"
+
+      multidimensional_knapsack:
+        definition: "Multiple capacity constraints (e.g., weight AND volume)."
+        examples:
+          - "Container with weight limit 1000kg AND volume limit 50m³."
+        near_misses:
+          - "Single capacity constraint (that's zero_one, bounded, or unbounded)"
+
+  scheduling:
+    definition: "Allocate tasks/jobs to resources over time; minimize makespan, lateness, or cost."
+
+    subtypes:
+      job_shop:
+        definition: "Jobs with sequences of operations on specific machines; minimize makespan."
+        examples:
+          - "Schedule 5 jobs on 3 machines where each job has specific machine sequence."
+        near_misses:
+          - "All jobs same sequence (that's flow_shop)"
+
+      flow_shop:
+        definition: "All jobs follow the same machine sequence; minimize makespan."
+        examples:
+          - "All jobs go M1→M2→M3→M4; find optimal job order."
+        near_misses:
+          - "Different sequences per job (that's job_shop)"
+
+      single_machine:
+        definition: "Schedule jobs on one machine; minimize completion time or weighted tardiness."
+        examples:
+          - "8 jobs on one machine with setup times between job types."
+        near_misses:
+          - "Multiple machines (that's job_shop or flow_shop)"
+
+      shift_rostering:
+        definition: "Assign employees to shifts over time; satisfy coverage and employee constraints."
+        examples:
+          - "Weekly schedule for 10 employees; min coverage per shift; consecutive days off."
+        near_misses:
+          - "Job sequencing on machines (that's job_shop)"
+
+      project_scheduling:
+        definition: "Schedule activities with precedence constraints; minimize project duration (PERT/CPM)."
+        examples:
+          - "10 activities with precedences; some can run in parallel; minimize total time."
+        near_misses:
+          - "Machine scheduling (that's job_shop)"
+
+  lp:
+    definition: "Continuous linear programs that don't clearly fit other families; pure resource allocation without special structure."
+
+    subtypes:
+      resource_allocation:
+        definition: "Allocate limited resources to activities; continuous variables; maximize profit or minimize cost."
+        examples:
+          - "100 labor hours available; Product A takes 2 hours, Product B takes 5 hours; maximize profit."
+        near_misses:
+          - "Integer units required (that's mip)"
+          - "Time-indexed with inventory (that's lot_sizing)"
+
+      diet_problem:
+        definition: "Select quantities of foods to meet nutritional constraints at minimum cost."
+        examples:
+          - "Choose amounts of foods to meet daily vitamins at minimum cost."
+        near_misses:
+          - "Binary selection (that's knapsack)"
+
+  mip:
+    definition: "Mixed-integer programs with complex structure not clearly fitting other families; includes binary setup decisions, piecewise linear, big-M formulations."
+
+    subtypes:
+      fixed_charge:
+        definition: "Binary setup variables with continuous quantities; fixed cost if any amount is produced/shipped."
+        examples:
+          - "Open facility (binary) with fixed cost; then continuous shipping amounts."
+        near_misses:
+          - "Pure facility location (that's location_allocation family)"
+
+      piecewise_linear:
+        definition: "Objective or constraints with piecewise linear functions (SOS2)."
+        examples:
+          - "Cost function with breakpoints; different rates in different ranges."
+        near_misses:
+          - "Simple linear (that's lp)"
+
+      big_m_logical:
+        definition: "Logical constraints (if-then, either-or) modeled with big-M."
+        examples:
+          - "If facility is open, then minimum throughput; else zero."
+        near_misses:
+          - "No logical constraints (might be lp or other family)"
+
+  nlp:
+    definition: "Nonlinear programming; convex or general nonlinear objectives/constraints."
+
+    subtypes:
+      quadratic_programming:
+        definition: "Quadratic objective (e.g., portfolio variance) with linear or quadratic constraints."
+        examples:
+          - "Portfolio optimization minimizing variance subject to return target."
+        near_misses:
+          - "Linear objective (that's lp or other family)"
+
+      convex_nlp:
+        definition: "General convex nonlinear program."
+        examples:
+          - "Minimize convex function subject to convex constraints."
+        near_misses:
+          - "Non-convex (that's general_nlp)"
+
+      general_nlp:
+        definition: "Non-convex nonlinear program."
+        examples:
+          - "Minimize non-convex objective with nonlinear constraints."
+        near_misses:
+          - "Convex (that's convex_nlp or quadratic_programming)"
+
+# Notes:
+# - All aliases (e.g., "portfolio" → "knapsack") live in aliases.yml
+# - "transportation" is treated as a simplified min_cost_flow (bipartite graph, no intermediate nodes)
+# - If multiple families apply, use conflict resolution rules (see router.py)

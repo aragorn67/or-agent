@@ -1,27 +1,83 @@
 # agent/core.py
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from llm.client import LLMClient
+from llm.intent_router import IntentRouter
+from llm.follow_up_handler import FollowUpHandler
 from solvers import get_solver, list_problem_types
 from analysis.detector import AnalysisDetector
 from analysis.engine import AnalysisEngine
 
 class OptimizationAgent:
-    """Main agent orchestrating problem solving"""
+    """Main agent orchestrating problem solving with intelligent intent routing"""
 
     def __init__(self, llm_client: LLMClient):
         self.llm = llm_client
+        self.intent_router = IntentRouter(llm_client)
+        self.follow_up_handler = FollowUpHandler(llm_client)
         self.analysis_detector = AnalysisDetector(llm_client)
         self.analysis_engine = AnalysisEngine()
 
-    def solve_natural_language(self, description: str, progress_callback=None) -> Dict[str, Any]:
-        """Main entry point for natural language problem solving"""
+        # Conversation state
+        self.conversation_context = {
+            "last_solution": None,
+            "messages": []
+        }
+
+    def solve_natural_language(self, description: str, progress_callback=None, conversation_context: Optional[Dict] = None) -> Dict[str, Any]:
+        """
+        Main entry point for natural language problem solving with intent routing.
+
+        This is the refactored version that:
+        1. Routes smalltalk/help to quick handlers
+        2. Detects follow-ups and handles deterministically when possible
+        3. Only processes optimization problems through the full pipeline
+        """
 
         def update_progress(step: str, progress: int):
             if progress_callback:
                 progress_callback(step, progress)
 
+        # Use provided context or instance context
+        if conversation_context is None:
+            conversation_context = self.conversation_context
+
+        # Add message to context
+        conversation_context.setdefault("messages", []).append({
+            "role": "user",
+            "content": description
+        })
+
         try:
-            update_progress("Analyzing problem type...", 10)
+            # STAGE 1: Intent Detection (NEW - fixes Issue #1)
+            update_progress("Detecting intent...", 5)
+            intent_result = self.intent_router.detect_intent(description, conversation_context)
+            intent_type = intent_result.get("intent", "optimization")
+
+            # Handle smalltalk
+            if intent_type == "smalltalk":
+                response = self.intent_router.handle_smalltalk(description)
+                return {
+                    "success": True,
+                    "type": "smalltalk",
+                    "response": response["response"]
+                }
+
+            # Handle help requests
+            if intent_type == "help":
+                response = self.intent_router.handle_help_request(description)
+                return {
+                    "success": True,
+                    "type": "help",
+                    "response": response["response"]
+                }
+
+            # Handle follow-ups (NEW - fixes Issue #3)
+            if intent_type == "follow_up":
+                update_progress("Handling follow-up question...", 10)
+                return self._handle_follow_up(description, conversation_context, update_progress)
+
+            # Otherwise, process as optimization problem
+            update_progress("Analyzing problem type...", 15)
 
             # Step 1: Classify problem type
             available_types = list_problem_types()
@@ -41,8 +97,10 @@ class OptimizationAgent:
                     "confidence": confidence
                 }
 
-            # Step 2: Get appropriate solver
-            solver = get_solver(problem_type)
+            # Step 2: Map problem type to solver
+            # Some problem types are subcategories that map to a generic solver
+            solver_type = self._map_to_solver(problem_type)
+            solver = get_solver(solver_type.lower())
 
             update_progress("Extracting parameters from description...", 40)
 
@@ -82,7 +140,10 @@ class OptimizationAgent:
             update_progress("Generating explanation...", 85)
 
             # Step 6: Generate explanation with original description for unit context
-            explanation = self.llm.explain_solution(solution, problem_type, description)
+            # New: explain_solution returns a dict with summary, explanation, units_info
+            explanation_result = self.llm.explain_solution(solution, problem_type, description)
+            explanation = explanation_result.get('explanation', '')
+            summary = explanation_result.get('summary', '')
 
             update_progress("Checking for analysis requests...", 90)
 
@@ -102,12 +163,18 @@ class OptimizationAgent:
                 "confidence": confidence,
                 "extracted_params": params,
                 "solution": solution,
-                "explanation": explanation
+                "explanation": explanation,
+                "summary": summary,
+                "units_info": explanation_result.get('units_info', {}),
+                "grounding_check": explanation_result.get('grounding_check', 'unknown')
             }
 
             # Add analysis results if any
             if analysis_results:
                 result["analysis"] = analysis_results
+
+            # Store in conversation context for follow-ups
+            conversation_context["last_solution"] = result
 
             return result
 
@@ -154,6 +221,67 @@ class OptimizationAgent:
                     "problem_type": "UNKNOWN",
                     "confidence": 0.0
                 }
+
+    def _handle_follow_up(self, message: str, conversation_context: Dict, update_progress) -> Dict[str, Any]:
+        """
+        Handle follow-up questions about previous solutions.
+        Uses deterministic responses when possible (NEW - fixes Issue #3).
+        """
+
+        last_solution = conversation_context.get("last_solution")
+
+        if not last_solution:
+            return {
+                "success": False,
+                "error": "No previous optimization solution found. Please solve a problem first.",
+                "type": "follow_up_error"
+            }
+
+        # Detect follow-up type
+        follow_up_result = self.follow_up_handler.detect_follow_up_intent(message, conversation_context)
+        follow_up_type = follow_up_result.get("follow_up_type", "question")
+
+        # Handle questions deterministically when possible
+        if follow_up_type == "question":
+            question_category = follow_up_result.get("question_category", "general")
+            deterministic_answer = self.follow_up_handler.answer_deterministic_question(
+                message, last_solution, question_category
+            )
+
+            if deterministic_answer:
+                return {
+                    "success": True,
+                    "type": "follow_up_question",
+                    "response": deterministic_answer,
+                    "deterministic": True
+                }
+
+        # Handle modifications
+        if follow_up_type == "modification":
+            return {
+                "success": True,
+                "type": "follow_up_modification",
+                "response": "Parameter modification detected. To implement changes, please describe the complete modified problem, or ask me to re-solve with specific changes (e.g., 'Re-solve with Seattle capacity = 500').",
+                "modification_targets": follow_up_result.get("modification_targets", [])
+            }
+
+        # Handle analysis requests
+        if follow_up_type == "analysis":
+            analysis_types = follow_up_result.get("analysis_types", [])
+            return {
+                "success": True,
+                "type": "follow_up_analysis",
+                "response": f"Analysis request detected: {', '.join(analysis_types)}. Advanced analysis features are being implemented. For now, you can ask specific questions about the solution.",
+                "analysis_types": analysis_types
+            }
+
+        # Generic follow-up response (fallback)
+        return {
+            "success": True,
+            "type": "follow_up_general",
+            "response": f"I can help with questions about your previous {last_solution.get('problem_type', 'optimization')} solution. What would you like to know?",
+            "deterministic": False
+        }
 
     def _perform_requested_analyses(self, analysis_requests: Dict, params: Dict) -> List[Dict]:
         """Perform the analyses requested by the user"""
@@ -243,6 +371,24 @@ class OptimizationAgent:
             })
 
         return results
+
+    def _map_to_solver(self, problem_type: str) -> str:
+        """
+        Map problem type/subcategory to actual solver name
+
+        Scheduling subcategories all map to "scheduling" solver
+        """
+        # Scheduling subcategories
+        scheduling_types = [
+            "job_shop", "flow_shop", "single_stage_scheduling",
+            "shift_rostering", "project_scheduling"
+        ]
+
+        if problem_type.lower() in scheduling_types:
+            return "scheduling"
+
+        # Default: use the problem type as-is
+        return problem_type
 
     def get_capabilities(self) -> Dict[str, Any]:
         """Return agent capabilities and supported problem types"""

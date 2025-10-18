@@ -12,6 +12,15 @@ class OllamaClient(LLMClient):
         self.model = model
 
     def _chat(self, system: str, user: str, json_mode: bool = False) -> str:
+        """
+        Core chat functionality with robust error handling.
+
+        Raises:
+            requests.exceptions.Timeout: If request times out
+            requests.exceptions.ConnectionError: If can't connect to Ollama
+            requests.exceptions.HTTPError: If server returns error status
+            ValueError: If response format is invalid
+        """
         payload = {
             "model": self.model,
             "messages": [
@@ -19,17 +28,58 @@ class OllamaClient(LLMClient):
                 {"role": "user", "content": user.strip()},
             ],
             "stream": False,
-            "options": {"temperature": 0}
+            "options": {
+                "temperature": 0,
+                "top_p": 0.9,
+                "repeat_penalty": 1.1,
+                "num_ctx": 4096,
+                "stop": ["\n\n```", "\n\n#","</json>"]
+            }
         }
         if json_mode:
             # Force well-formed JSON content from the model
             payload["format"] = "json"
 
-        resp = requests.post(f"{self.host}/api/chat", json=payload, timeout=60)
-        resp.raise_for_status()
-        data = resp.json()
-        # '/api/chat' returns {"message": {"role":"assistant","content":"..."}}
-        return data["message"]["content"]
+        try:
+            resp = requests.post(f"{self.host}/api/chat", json=payload, timeout=60)
+            resp.raise_for_status()
+            data = resp.json()
+
+            # Validate response structure
+            if "message" not in data or "content" not in data["message"]:
+                raise ValueError(f"Invalid response format from Ollama: {data}")
+
+            return data["message"]["content"]
+
+        except requests.exceptions.Timeout:
+            raise requests.exceptions.Timeout(
+                f"Request to Ollama timed out after 60 seconds. "
+                f"The model '{self.model}' may be too slow or the server may be overloaded."
+            )
+        except requests.exceptions.ConnectionError as e:
+            raise requests.exceptions.ConnectionError(
+                f"Could not connect to Ollama at {self.host}. "
+                f"Please ensure Ollama is running and accessible. Original error: {e}"
+            )
+        except requests.exceptions.HTTPError as e:
+            status_code = e.response.status_code if hasattr(e, 'response') else 'unknown'
+            if status_code == 404:
+                raise requests.exceptions.HTTPError(
+                    f"Model '{self.model}' not found. Please pull it with: ollama pull {self.model}"
+                )
+            elif status_code >= 500:
+                raise requests.exceptions.HTTPError(
+                    f"Ollama server error (HTTP {status_code}). The server may be experiencing issues."
+                )
+            else:
+                raise requests.exceptions.HTTPError(
+                    f"HTTP error {status_code} from Ollama: {e}"
+                )
+        except json.JSONDecodeError as e:
+            raise ValueError(
+                f"Could not parse JSON response from Ollama. "
+                f"The server may have returned malformed data. Error: {e}"
+            )
 
     def classify_problem(self, description: str, problem_types: List[str]) -> Dict[str, Any]:
         # Allow any subset: e.g., ["TRANSPORTATION","ASSIGNMENT","SINGLE_MACHINE"]
@@ -61,98 +111,16 @@ class OllamaClient(LLMClient):
             return {"type": "UNKNOWN", "confidence": 0.0}
 
     def extract_parameters(self, description: str, problem_type: str, example: Dict) -> Dict[str, Any]:
+        """
+        Base extraction - delegates to specialists via EnhancedLLMClient.
+        This method should not be called directly; use EnhancedLLMClient instead.
+        """
         problem_type = (problem_type or "").upper()
 
-        if problem_type == "TRANSPORTATION":
-            system = """
-    Extract parameters for a Transportation LP. Output STRICT JSON with keys:
-    - plants: string[]
-    - markets: string[]
-    - capacity: {plant: number}
-    - demand: {market: number}
-    - cost: {plant: {market: number}}  # per-unit shipping cost matrix
-    - integer_shipments: boolean (optional, default false)
-    - allow_unbalanced: boolean (optional, default false)
+        # This is a fallback - the enhanced client should route to specialists
+        return {"error": f"Direct extraction from OllamaClient not supported. Use EnhancedLLMClient for problem_type: {problem_type}"}
 
-    Rules:
-    - Use ONLY entities & numbers explicitly present in the text.
-    - If ANY required piece is missing, return: {"error": "<what's missing, be specific>"}.
-    - No extra keys. All numbers must be numbers, not strings.
-    """
-            user = f"TEXT:\n{description}\n\nReturn ONLY the JSON."
-
-            try:
-                content = self._chat(system, user, json_mode=True)
-                result = json.loads(content)
-
-                if "error" in result:
-                    return result
-
-                # Validate in-code before returning
-                validation_error = self._validate_transportation_extraction(description, result)
-                if validation_error:
-                    return {"error": validation_error}
-
-                return result
-
-            except json.JSONDecodeError as e:
-                return {"error": f"Invalid JSON response from LLM: {str(e)}"}
-            except Exception as e:
-                return {"error": f"Extraction error: {e}"}
-
-        # Fallback for other families until you add their schemas
-        return {"error": f"Unsupported problem_type for extraction: {problem_type}"}
-
-    def _validate_transportation_extraction(self, description: str, p: Dict) -> str:
-        # Required fields present?
-        required = ["plants", "markets", "capacity", "demand", "cost"]
-        missing = [k for k in required if k not in p or not p[k]]
-        if missing:
-            return f"Missing required information: {', '.join(missing)}."
-
-        plants = p["plants"]
-        markets = p["markets"]
-        cap = p["capacity"]
-        dem = p["demand"]
-        cost = p["cost"]
-
-        # Keys align?
-        if set(cap.keys()) != set(plants):
-            return "Each plant in 'plants' must appear in 'capacity' (keys must match)."
-        if set(dem.keys()) != set(markets):
-            return "Each market in 'markets' must appear in 'demand' (keys must match)."
-
-        # Cost matrix completeness
-        for i in plants:
-            row = cost.get(i)
-            if not isinstance(row, dict):
-                return f"Cost row for plant '{i}' is missing or malformed."
-            missing_cols = [j for j in markets if j not in row]
-            if missing_cols:
-                return f"Missing costs from plant '{i}' to markets: {', '.join(missing_cols)}."
-
-        # Optional: numerical sanity checks
-        if any(v < 0 for v in cap.values()):
-            return "Capacity values must be non-negative."
-        if any(v < 0 for v in dem.values()):
-            return "Demand values must be non-negative."
-        for i in plants:
-            for j in markets:
-                if cost[i][j] < 0:
-                    return f"Cost {i}->{j} must be non-negative."
-
-        # (Optional) check stated counts in prose vs extracted
-        import re
-        text = description.lower()
-        mplant = re.search(r'(\d+)\s+(?:plants?|factories|sources)', text)
-        if mplant and int(mplant.group(1)) != len(plants):
-            return f"You mentioned {mplant.group(1)} plants/sources but extracted {len(plants)} names. Please list all."
-
-        mmarket = re.search(r'(\d+)\s+(?:markets|customers|destinations|sinks)', text)
-        if mmarket and int(mmarket.group(1)) != len(markets):
-            return f"You mentioned {mmarket.group(1)} customers/destinations but extracted {len(markets)} names. Please list all."
-
-        return None  # OK
+    # Validation removed - now centralized in TransportationSpecialist
 
     def explain_solution(self, solution: Dict, problem_type: str, original_description: str = "") -> str:
         system = "Explain the solution briefly, focusing on objective value and the key chosen decisions."
