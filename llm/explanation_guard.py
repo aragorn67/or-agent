@@ -20,11 +20,17 @@ class ExplanationGuard:
             'numbers': set()
         }
 
-        # Extract total cost
+        # Extract total cost (keep decimals, don't cast to int)
         cost = solution_data.get('objective_value') or solution_data.get('objective_thousand_usd', 0)
-        if cost:
+        if cost is not None:  # Allow zero values
             facts['total_cost'] = cost
-            facts['numbers'].add(str(int(cost)))
+            # Store both integer and decimal representations
+            facts['numbers'].add(str(int(cost)))  # Integer version
+            facts['numbers'].add(str(float(cost)))  # Decimal version
+            # Also store rounded versions
+            if cost != 0:  # Only add rounded versions for non-zero
+                facts['numbers'].add(f"{cost:.1f}")
+                facts['numbers'].add(f"{cost:.2f}")
 
         # Extract entity names and routes from flows
         flows = solution_data.get('flows', [])
@@ -41,7 +47,13 @@ class ExplanationGuard:
                     'to': market,
                     'value': value
                 })
-                facts['numbers'].add(str(int(value)))
+                # Store multiple representations of numbers to support decimal matching
+                if value is not None:  # Allow zero values
+                    facts['numbers'].add(str(int(value)))  # Integer
+                    facts['numbers'].add(str(float(value)))  # Full decimal
+                    if value != int(value) and value != 0:  # If it's a decimal
+                        facts['numbers'].add(f"{value:.1f}")
+                        facts['numbers'].add(f"{value:.2f}")
 
         # Extract utilization data
         utilization = solution_data.get('utilization', {})
@@ -50,7 +62,10 @@ class ExplanationGuard:
             rate = data.get('utilization_rate', 0)
             if rate:
                 facts['utilization'][plant] = rate
+                # Store percentage representations
                 facts['numbers'].add(str(int(rate * 100)))
+                facts['numbers'].add(f"{rate * 100:.1f}")
+                facts['numbers'].add(f"{rate * 100:.2f}")
 
         return facts
 
@@ -102,10 +117,15 @@ class ExplanationGuard:
         if facts['status'] == 'OPTIMAL' and facts['total_cost']:
             summary_parts.append(f"Optimal solution with total cost {facts['total_cost']}")
 
-        # Top routes
+        # Top routes (preserve decimals if present)
         routes = sorted(facts['routes'], key=lambda x: x['value'], reverse=True)[:3]
         if routes:
-            route_strs = [f"{r['from']} → {r['to']}: {int(r['value'])} units" for r in routes]
+            route_strs = []
+            for r in routes:
+                val = r['value']
+                # Show decimals if meaningful, otherwise show as integer
+                val_str = f"{val:.1f}" if val != int(val) else str(int(val))
+                route_strs.append(f"{r['from']} → {r['to']}: {val_str} units")
             summary_parts.append(f"Key routes: {', '.join(route_strs)}")
 
         # Utilization if available

@@ -1,0 +1,118 @@
+# Alias Mapping for OR Problem Types
+# Maps synonyms and common variations to canonical taxonomy labels
+# Format: alias_name → canonical_family.subtype (or just family if no subtype)
+
+version: "1.0"
+last_updated: "2025-10-12"
+
+# Family-level aliases
+aliases:
+  # Transportation is simplified min_cost_flow
+  transportation: network_flow.min_cost_flow
+  transport: network_flow.min_cost_flow
+  shipping: network_flow.min_cost_flow
+  distribution: network_flow.min_cost_flow
+
+  # Portfolio is knapsack-based
+  portfolio: knapsack.zero_one_knapsack
+  portfolio_optimization: knapsack.zero_one_knapsack
+  investment_selection: knapsack.zero_one_knapsack
+  capital_budgeting: knapsack.zero_one_knapsack
+
+  # Production planning maps to lot_sizing
+  production_planning: lot_sizing.capacitated_lot_sizing
+  production_scheduling: lot_sizing.capacitated_lot_sizing
+  aggregate_planning: lot_sizing.multi_product_lot_sizing
+
+  # Matching variations
+  matching: matching_assignment.bipartite_matching
+  hungarian: matching_assignment.assignment
+
+  # Routing
+  routing: network_flow.shortest_path
+  path_finding: network_flow.shortest_path
+
+  # Covering
+  covering: location_allocation.set_cover
+
+  # Packing (related to knapsack)
+  bin_packing: knapsack.zero_one_knapsack  # Simplified, could be mip
+  packing: knapsack.zero_one_knapsack
+
+  # Scheduling variations
+  rostering: scheduling.shift_rostering
+  timetabling: scheduling.shift_rostering
+  sequencing: scheduling.job_shop
+
+  # Network
+  network: network_flow.min_cost_flow
+  mcf: network_flow.min_cost_flow
+  mcnf: network_flow.min_cost_flow
+
+  # Linear programming
+  linear_program: lp.resource_allocation
+  linear_programming: lp.resource_allocation
+  simplex: lp.resource_allocation
+
+  # Integer programming
+  integer_program: mip.fixed_charge
+  integer_programming: mip.fixed_charge
+  ilp: mip.fixed_charge
+  milp: mip.fixed_charge
+
+  # Quadratic
+  qp: nlp.quadratic_programming
+  quadratic: nlp.quadratic_programming
+
+  # Location
+  location: location_allocation.facility_location
+  p-median: location_allocation.p_median
+  p_center: location_allocation.p_median
+
+  # Flow variants
+  maxflow: network_flow.max_flow
+  max-flow: network_flow.max_flow
+  min-cost-flow: network_flow.min_cost_flow
+  mincost: network_flow.min_cost_flow
+
+  # Shortest path variants
+  dijkstra: network_flow.shortest_path
+  bellman_ford: network_flow.shortest_path
+  floyd_warshall: network_flow.shortest_path  # All-pairs, but still shortest_path family
+
+  # Assignment variants
+  lap: matching_assignment.assignment  # Linear Assignment Problem
+  weapon_target: matching_assignment.assignment
+
+  # Knapsack variants
+  knapsack_problem: knapsack.zero_one_knapsack
+  01_knapsack: knapsack.zero_one_knapsack
+  multiple_knapsack: knapsack.bounded_knapsack
+
+  # Lot sizing variants
+  economic_order_quantity: lot_sizing.uncapacitated_lot_sizing
+  eoq: lot_sizing.uncapacitated_lot_sizing
+  economic_lot_sizing: lot_sizing.uncapacitated_lot_sizing
+  elsp: lot_sizing.multi_product_lot_sizing  # Economic Lot Scheduling Problem
+
+  # Scheduling variants
+  makespan: scheduling.job_shop
+  flowshop: scheduling.flow_shop
+  jobshop: scheduling.job_shop
+  job-shop: scheduling.job_shop
+  flow-shop: scheduling.flow_shop
+  rcpsp: scheduling.project_scheduling  # Resource-Constrained Project Scheduling
+  pert: scheduling.project_scheduling
+  cpm: scheduling.project_scheduling  # Critical Path Method
+
+  # Facility
+  warehouse_location: location_allocation.facility_location
+  plant_location: location_allocation.facility_location
+  ufl: location_allocation.facility_location  # Uncapacitated Facility Location
+  cflp: location_allocation.facility_location  # Capacitated Facility Location Problem
+
+# Special handling notes:
+# - If input exactly matches an alias, map directly
+# - If input contains multiple terms, check for longest match first
+# - Aliases are case-insensitive (normalise_label() lowercases)
+# - Underscores, hyphens, spaces are equivalent (normalize to underscores)

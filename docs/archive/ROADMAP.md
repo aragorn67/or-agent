@@ -186,22 +186,33 @@ Transform the current transportation optimization agent into a conversational, m
 
 ## Next Steps
 
-### Immediate Actions (1–2 weeks) – Finalising Phase 1
-1. Fix parameter modification detection (critical bug)  
-2. Implement advanced what-if scenario handling  
-3. Improve error handling for edge cases  
-4. Update documentation for conversation system  
+### Immediate Actions (1–2 weeks) – Enhanced Problem Classification and Parameter Extraction
 
-### Medium-Term Goals (2 months) – Start Phase 2
-1. Launch Pareto analysis (multi-objective optimisation)  
-2. Enhance constraint and parameter updates  
-3. Expand documentation and user guides  
+**Completed:**
+1. Implemented schema-based problem classification system with structured JSON validation
+2. Created multi-domain classification supporting transportation, assignment, knapsack, job shop scheduling, and other OR problem types
+3. Developed majority voting mechanism for robust classification decisions with confidence scoring
+4. Enhanced parameter extraction with detailed error handling and validation
+5. Integrated structured signals detection for improved classification accuracy
+6. Added comprehensive test suite covering full pipeline: classification → parameter extraction → solution
 
-### Long-Term Goals (6 months)
-1. Support multiple optimisation problem types (5+)  
-2. Build professional frontend (React-based)  
-3. Deploy to cloud (scalable, production-ready)  
-4. Grow open-source community  
+**Remaining Tasks:**
+1. Optimize classification performance by reducing voting iterations for faster response times
+2. Integrate schema-based classifier into conversation system to replace complex prompt-based detection
+3. Extend parameter modification detection to leverage structured classification signals
+4. Add support for constraint detection and forbidden route identification in transportation problems
+
+### Medium-Term Goals (2 months) – Advanced Mathematical Understanding
+1. Implement constraint parsing for complex optimization problems with multiple restrictions
+2. Develop automatic problem reformulation capabilities for unbalanced and infeasible cases
+3. Add support for multi-objective optimization with Pareto front generation
+4. Create intelligent problem decomposition for large-scale optimization instances
+
+### Long-Term Goals (6 months) – Comprehensive OR Platform
+1. Expand mathematical extraction to cover network flow, facility location, and scheduling domains
+2. Implement automatic model validation and feasibility analysis
+3. Develop adaptive parameter tuning based on problem characteristics
+4. Create domain-specific extraction specialists for specialized OR problem classes  
 
 ---
 
