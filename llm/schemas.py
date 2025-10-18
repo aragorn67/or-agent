@@ -1,14 +1,32 @@
 # llm/schemas.py
 CLASS_ENUM = [
-    "transportation", "assignment", "knapsack",
-    "shortest_path", "max_flow", "facility_location",
-    "job_shop", "set_cover", "lot_sizing", "portfolio",
+    # Transportation subcategories
+    "transportation",
+
+    # Assignment
+    "assignment",
+
+    # Scheduling subcategories (specific types)
+    "job_shop",                    # Multi-stage with operation sequences
+    "flow_shop",                   # Fixed machine sequence
+    "single_stage_scheduling",     # Single processing step (solvable by current solver)
+    "shift_rostering",             # Employee/nurse scheduling
+    "project_scheduling",          # PERT/CPM with precedence
+
+    # Other problem types
+    "knapsack",
+    "shortest_path",
+    "max_flow",
+    "facility_location",
+    "set_cover",
+    "lot_sizing",
+    "portfolio",
     "custom_review"  # use when uncertain
 ]
 
 CLASSIFICATION_SCHEMA = {
   "type": "object",
-  "required": ["problem_type","confidence","signals","evidence","why_short"],
+  "required": ["problem_type","confidence","signals","evidence","why_short","objective"],
   "properties": {
     "problem_type": {"type":"string","enum": CLASS_ENUM},
     "confidence": {"type":"number","minimum":0,"maximum":1},
@@ -17,7 +35,15 @@ CLASSIFICATION_SCHEMA = {
         "type":"object","required":["field","quote"],
         "properties":{"field":{"type":"string"},"quote":{"type":"string"}}
     }},
-    "why_short": {"type":"string"}  # 1-liner, no definitions
+    "why_short": {"type":"string"},  # 1-liner, no definitions
+    "objective": {
+      "type":"object",
+      "required":["sense","target"],
+      "properties":{
+        "sense": {"type":"string","enum":["minimize","maximize"]},
+        "target": {"type":"string","description":"What is being optimized (e.g., 'total_cost', 'makespan', 'revenue', 'flow', 'distance')"}
+      }
+    }
   },
   "additionalProperties": False
 }
