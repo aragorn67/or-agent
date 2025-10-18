@@ -97,8 +97,10 @@ class OptimizationAgent:
                     "confidence": confidence
                 }
 
-            # Step 2: Get appropriate solver
-            solver = get_solver(problem_type)
+            # Step 2: Map problem type to solver
+            # Some problem types are subcategories that map to a generic solver
+            solver_type = self._map_to_solver(problem_type)
+            solver = get_solver(solver_type.lower())
 
             update_progress("Extracting parameters from description...", 40)
 
@@ -369,6 +371,24 @@ class OptimizationAgent:
             })
 
         return results
+
+    def _map_to_solver(self, problem_type: str) -> str:
+        """
+        Map problem type/subcategory to actual solver name
+
+        Scheduling subcategories all map to "scheduling" solver
+        """
+        # Scheduling subcategories
+        scheduling_types = [
+            "job_shop", "flow_shop", "single_stage_scheduling",
+            "shift_rostering", "project_scheduling"
+        ]
+
+        if problem_type.lower() in scheduling_types:
+            return "scheduling"
+
+        # Default: use the problem type as-is
+        return problem_type
 
     def get_capabilities(self) -> Dict[str, Any]:
         """Return agent capabilities and supported problem types"""

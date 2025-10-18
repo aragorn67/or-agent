@@ -3,6 +3,7 @@ from typing import Dict, Any, List
 from .client import LLMClient
 from .ollama_client import OllamaClient
 from .transportation_specialist import TransportationSpecialist
+from .scheduling_specialist import SchedulingSpecialist
 from .problem_classifier import ProblemClassifier
 
 class EnhancedLLMClient(LLMClient):
@@ -14,9 +15,9 @@ class EnhancedLLMClient(LLMClient):
         # Initialize classifier and specialists
         self.classifier = ProblemClassifier(self.base_client)
         self.transportation = TransportationSpecialist(self.base_client)
+        self.scheduling = SchedulingSpecialist(self.base_client)
 
         # Future specialists can be added here:
-        # self.scheduling = SchedulingSpecialist(self.base_client)
         # self.assignment = AssignmentSpecialist(self.base_client)
         # self.knapsack = KnapsackSpecialist(self.base_client)
 
@@ -44,9 +45,10 @@ class EnhancedLLMClient(LLMClient):
         if problem_type == "TRANSPORTATION":
             return self.transportation.extract_parameters(description)
 
+        elif problem_type == "SCHEDULING":
+            return self.scheduling.extract_parameters(description)
+
         # Future problem types:
-        # elif problem_type == "SCHEDULING":
-        #     return self.scheduling.extract_parameters(description)
         # elif problem_type == "ASSIGNMENT":
         #     return self.assignment.extract_parameters(description)
 
@@ -112,6 +114,9 @@ class EnhancedLLMClient(LLMClient):
         if problem_type == "TRANSPORTATION":
             return self.transportation.suggest_transportation_analysis(solution, params)
 
+        elif problem_type == "SCHEDULING":
+            return self.scheduling.suggest_scheduling_analysis(solution, params)
+
         # Future problem types will have their own suggestions
 
         else:
@@ -122,10 +127,12 @@ class EnhancedLLMClient(LLMClient):
         required_keys = {"plants", "markets", "capacity", "demand"}
         return required_keys.issubset(set(params.keys()))
 
+    def _is_scheduling_params(self, params: Dict) -> bool:
+        """Check if parameters match scheduling problem structure"""
+        required_keys = {"orders", "units", "processing_time", "due_date"}
+        return required_keys.issubset(set(params.keys()))
+
     # Future helper methods for other problem types:
-    # def _is_scheduling_params(self, params: Dict) -> bool:
-    #     required_keys = {"jobs", "machines", "processing_times"}
-    #     return required_keys.issubset(set(params.keys()))
 
     # def _is_assignment_params(self, params: Dict) -> bool:
     #     required_keys = {"agents", "tasks", "costs"}
