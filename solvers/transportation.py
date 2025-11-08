@@ -11,7 +11,7 @@ class TransportationSolver(OptimizationSolver):
 
     @property
     def problem_type(self) -> str:
-        return "TRANSPORTATION"
+        return "transportation"
 
     @property
     def description(self) -> str:

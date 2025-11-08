@@ -2,6 +2,473 @@
 
 ---
 
+## 2025-11-03
+
+### 🎯 Agentic AI Development Roadmap - Complete Plan
+
+Based on discussion with user, comprehensive plan for building an advanced agentic AI for OR problems.
+
+---
+
+### **PHASE 1: UNBLOCK CLASSIFICATION (CRITICAL - Must Do First)** 🚨
+
+**Current Blocker**: LLM-only classification has 17-25% accuracy on scheduling subcategories
+- System rejects solvable problems (single_stage_scheduling)
+- Cannot route to correct solvers
+- Parameter extraction fails due to wrong problem type detection
+
+#### Tasks:
+
+**1.1 Collect Training Data** ⏱️ 1-2 weeks (IN PROGRESS)
+- Target: 90-120 labeled OR problems (60 base + 30-60 adversarial)
+- Priority: Heavy focus on SCHEDULING subcategories
+- Google Sheet: https://docs.google.com/spreadsheets/d/1_dQ9_0rXrzR6ISr51h6H44eDfQPi2Xh-wLRY0hAHJuU/edit
+- Status: Team member collecting data
+
+**1.2 Download and Validate Data** ⏱️ 5-10 minutes
+```bash
+mkdir -p data_collection
+# Download CSV from Google Sheet → data_collection/training_data.csv
+# Validate: check counts, categories, scheduling subtypes
+```
+
+**1.3 Create Training Scripts** ⏱️ 4-6 hours
+- `scripts/train_level1_classifier.py` - Train 9-category classifier
+- `scripts/train_subtype_classifiers.py` - Train per-family subcategory classifiers
+- `scripts/evaluate_classifiers.py` - Evaluate on phase1 test cases
+- Target accuracy: 85-90%+ (vs current 17-25%)
+
+**1.4 Train ML Classifiers** ⏱️ 2-3 hours
+- Train Level-1 classifier (categories: TRANSPORTATION, SCHEDULING, etc.)
+- Train SCHEDULING subtype classifier (CRITICAL: single_stage vs job_shop vs flow_shop)
+- Train other subtype classifiers per family
+- Uses existing infrastructure: `or_classify/feature_pipeline.py`, 25 labeling functions
+
+**1.5 Integrate ML Classifier** ⏱️ 2-3 hours
+- Replace LLM classification in `agent/core.py:84`
+- Implement hybrid voting: ML + LLM for consensus
+- Add confidence thresholding
+- Fallback to LLM for edge cases
+
+**Success Metrics**:
+- ✅ Scheduling subcategories: 90%+ accuracy (vs 17-25% current)
+- ✅ Inference time: <50ms (vs 2-5 seconds LLM)
+- ✅ single_stage problems correctly routed to solver
+- ✅ Phase 1 test suite: 85%+ overall accuracy
+
+---
+
+### **PHASE 1.5: RAG SYSTEM FOR OR KNOWLEDGE** 📚
+
+**Goal**: Load PhD thesis and OR papers to improve LLM's domain understanding
+
+**Why**: Enhance LLM with domain-specific OR knowledge without fine-tuning
+
+#### Tasks:
+
+**1.5.1 Setup RAG Infrastructure** ⏱️ 30 minutes
+- Install dependencies: `langchain`, `chromadb`, `pypdf`, `sentence-transformers`
+- Install Ollama embedding model: `ollama pull nomic-embed-text` (274MB)
+- Create directory structure:
+  ```
+  knowledge/
+    papers/              # User's PDFs go here
+    vectorstore/         # Chroma database (auto-created)
+  ```
+
+**1.5.2 Build Knowledge Base System** ⏱️ 2 hours
+- Create `llm/knowledge_base.py`:
+  - Load PDFs from `knowledge/papers/`
+  - Chunk documents (1000 chars, 200 overlap)
+  - Create embeddings using `nomic-embed-text`
+  - Store in Chroma vector database
+  - Query interface: `search(query, k=3)` returns relevant chunks
+- Create `llm/rag_embeddings.py`:
+  - Wrapper for Ollama embeddings
+  - Fallback to sentence-transformers
+  - Caching for frequently embedded queries
+
+**1.5.3 Integrate RAG into Specialists** ⏱️ 2 hours
+- Modify specialists to use knowledge base:
+  ```python
+  class TransportationSpecialist:
+      def __init__(self, llm_client, knowledge_base=None):
+          self.kb = knowledge_base
+
+      def extract_parameters(self, text):
+          # Get relevant context from papers
+          if self.kb:
+              context = self.kb.get_context(
+                  "transportation problem parameters",
+                  max_tokens=800
+              )
+              system_prompt += f"\n\nRelevant OR knowledge:\n{context}"
+  ```
+- Apply to: `transportation_specialist.py`, `scheduling_specialist.py`
+
+**1.5.4 Integrate RAG into Agent** ⏱️ 1 hour
+- Modify `agent/core.py`:
+  ```python
+  class OptimizationAgent:
+      def __init__(self, llm_client, knowledge_base=None):
+          self.kb = knowledge_base
+          # Pass KB to specialists
+          self.transportation_specialist = TransportationSpecialist(
+              llm_client, knowledge_base
+          )
+  ```
+- Initialize KB on startup in `api.py`:
+  ```python
+  kb = KnowledgeBase("knowledge/papers", "knowledge/vectorstore")
+  if not kb.index_exists():
+      kb.load_papers()
+      kb.build_index()  # 5-10 minutes first time
+  agent = OptimizationAgent(llm_client, knowledge_base=kb)
+  ```
+
+**1.5.5 Create Management Scripts** ⏱️ 1 hour
+- `scripts/rebuild_knowledge_base.py` - Rebuild index when adding papers
+- `scripts/query_knowledge.py` - Query KB directly for testing
+- `scripts/kb_stats.py` - Show statistics (papers, chunks, size)
+
+**1.5.6 User Actions Required** ⏱️ 5-10 minutes
+- Gather PDF files (PhD thesis + OR papers)
+- Copy PDFs to `knowledge/papers/` directory
+- Run initial indexing: `python scripts/rebuild_knowledge_base.py`
+
+**Expected Benefits**:
+- ✅ Better classification (uses definitions from papers)
+- ✅ Better parameter extraction (follows notation from papers)
+- ✅ Better explanations (uses terminology from papers)
+- ✅ Can cite sources: "According to [thesis, p.45]..."
+
+**Resource Requirements**:
+- Storage: ~400-600 MB (papers + vector DB + embedding model)
+- RAM: ~600-700 MB additional
+- Initial indexing: 5-10 minutes (one-time)
+- Query overhead: ~50-100ms per retrieval
+
+**Success Metrics**:
+- ✅ Successfully indexes all provided papers
+- ✅ Retrieval accuracy: Returns relevant chunks for queries
+- ✅ Integration: All specialists can access KB
+- ✅ Performance: <100ms retrieval time
+
+---
+
+### **PHASE 2: CLARIFICATION DIALOGUE (Agentic Feature)** 🤔
+
+**Goal**: LLM asks questions to ensure understanding before solving
+
+#### Tasks:
+
+**2.1 Create Clarification Handler** ⏱️ 1 day
+- New file: `llm/clarification_handler.py`
+- Detects missing/ambiguous parameters after extraction
+- Generates targeted questions (not generic)
+- Example:
+  ```
+  User: "Optimize shipping from 3 factories to 5 customers"
+  Agent detects missing: capacities, demands, costs
+  Agent asks:
+  1. "What are the supply capacities for each factory?"
+  2. "What are the demands at each customer?"
+  3. "Do you have shipping costs, or should I calculate from distances?"
+  ```
+
+**2.2 Integrate into Agent Pipeline** ⏱️ 2-3 hours
+- Modify `agent/core.py` extraction flow:
+  ```python
+  # After extraction
+  params = self.llm.extract_parameters(...)
+  if clarification_handler.needs_clarification(params):
+      questions = clarification_handler.generate_questions(params, description)
+      return {"type": "clarification_needed", "questions": questions}
+  ```
+
+**2.3 Add API Support** ⏱️ 2-3 hours
+- New endpoint: `POST /agent/clarify`
+- Web UI: Show questions to user, collect answers
+- Re-extract parameters with answers incorporated
+- Continue with solving
+
+**2.4 Add Question Types** ⏱️ 1 day
+- **Missing fields**: "What is the capacity at Factory A?"
+- **Ambiguous values**: "You said 'several' - can you specify exact numbers?"
+- **Validation**: "Should I minimize cost or time?"
+- **Constraints**: "Are there any restrictions on routes/assignments?"
+
+**Features**:
+- Problem-specific questions (transportation vs scheduling vs assignment)
+- Context-aware (uses already-extracted info)
+- Limited to 3-5 questions max (avoid overwhelming)
+- LLM generates validation questions for edge cases
+
+**Success Metrics**:
+- ✅ Detects 90%+ of missing required fields
+- ✅ Reduces extraction errors by 50%+
+- ✅ User satisfaction: problems solve correctly on first try
+
+---
+
+### **PHASE 3: MULTI-TURN CONVERSATION MEMORY** 💬
+
+**Goal**: Agent remembers context across multiple interactions
+
+#### Tasks:
+
+**3.1 Implement Conversation State** ⏱️ 1 day
+- Extend `agent/core.py`:
+  ```python
+  class OptimizationAgent:
+      def __init__(self):
+          self.conversation_memory = []       # Full history
+          self.solutions_cache = {}           # By problem ID
+          self.user_preferences = {}          # Learned patterns
+  ```
+
+**3.2 Add Session Management** ⏱️ 1 day
+- Session IDs for multi-turn conversations
+- Store in-memory (later: Redis/database)
+- API: `POST /agent/session/create`, `POST /agent/session/{id}/message`
+
+**3.3 Context-Aware Follow-ups** ⏱️ 1-2 days
+- "Solve the same problem but for Chicago instead"
+- "Compare this solution to the previous one"
+- "What if I double the capacity we discussed earlier?"
+- Reference previous problems: "Use the same costs as last time"
+
+**3.4 User Preference Learning** ⏱️ 1-2 days
+- Track: always wants sensitivity analysis, prefers certain formats
+- Auto-suggest based on history
+- "Last time you asked for charts - should I generate them now?"
+
+**Success Metrics**:
+- ✅ Correctly references previous problems (90%+ accuracy)
+- ✅ Maintains context for 5+ turns
+- ✅ Learns user preferences after 3-5 interactions
+
+---
+
+### **PHASE 4: PROACTIVE ANALYSIS SUGGESTIONS** 📊
+
+**Goal**: Agent suggests analyses without being asked
+
+#### Tasks:
+
+**4.1 Post-Solve Analysis Detection** ⏱️ 1 day
+- After solving, analyze solution structure:
+  ```python
+  def suggest_analyses(solution, problem_type):
+      suggestions = []
+      if has_bottleneck(solution):
+          suggestions.append("I noticed X is at 100% capacity. Sensitivity analysis?")
+      if has_slack(solution):
+          suggestions.append("Y has unused capacity. Want to see optimization opportunities?")
+      return suggestions
+  ```
+
+**4.2 Problem-Specific Suggestions** ⏱️ 1 day
+- Transportation: bottleneck analysis, route efficiency
+- Scheduling: makespan analysis, utilization charts
+- Assignment: cost distribution, workload balance
+
+**4.3 Interactive Analysis Flow** ⏱️ 1 day
+- Show suggestions as clickable options
+- User selects → agent runs analysis automatically
+- No need to re-phrase as questions
+
+**Success Metrics**:
+- ✅ Suggests relevant analyses 80%+ of the time
+- ✅ User engagement: 40%+ click-through on suggestions
+
+---
+
+### **PHASE 5: AUTONOMOUS PROBLEM REFINEMENT** 🔄
+
+**Goal**: Iterative improvement loop with user feedback
+
+#### Tasks:
+
+**5.1 Solution Feedback Collection** ⏱️ 1 day
+- After showing solution: "What would you like to change?"
+- Parse feedback: "Make Seattle cheaper", "Increase capacity", "Add constraint"
+
+**5.2 Iterative Solving Loop** ⏱️ 2 days
+```python
+while not user_satisfied:
+    solution = solve(problem)
+    show(solution)
+    feedback = ask_user("What would you like to change?")
+    if "nothing" or "looks good" in feedback:
+        break
+    problem = modify_based_on_feedback(problem, feedback)
+```
+
+**5.3 Smart Modification Detection** ⏱️ 1-2 days
+- Use LLM to parse modification requests
+- "Add 100 to Seattle capacity" → update params['supply']['Seattle'] += 100
+- "Remove route from A to B" → add constraint
+
+**Success Metrics**:
+- ✅ Correctly interprets 85%+ of modification requests
+- ✅ Average 2-3 iterations to user satisfaction
+
+---
+
+### **PHASE 6: ADD MORE PROBLEM TYPES** 🧩
+
+**Goal**: Expand solver capabilities beyond Transportation and Scheduling
+
+**Priority order** (infrastructure already exists):
+
+**6.1 Assignment Problems** ⏱️ 3-4 days
+- Labeling functions: ✅ Ready (`or_classify/lfs/assignment_lfs.py`)
+- Solver: Create `solvers/assignment_solver.py` (Hungarian algorithm or LP)
+- Specialist: Create `llm/assignment_specialist.py` (extract workers, tasks, costs)
+- Test cases: Add to `tests/phase1_test_cases.py`
+
+**6.2 Knapsack Problems** ⏱️ 3-4 days
+- Labeling functions: ✅ Ready (`or_classify/lfs/knapsack_lfs.py`)
+- Solver: Create `solvers/knapsack_solver.py` (dynamic programming or MIP)
+- Specialist: Create `llm/knapsack_specialist.py` (extract items, weights, values, capacity)
+
+**6.3 Network Flow Problems** ⏱️ 4-5 days
+- Labeling functions: ✅ Ready (`or_classify/lfs/network_flow_lfs.py`)
+- Solver: Create `solvers/network_flow_solver.py` (max flow, min-cost flow)
+- Specialist: Create `llm/network_flow_specialist.py` (extract nodes, edges, capacities)
+
+**Per problem type checklist**:
+1. Create solver implementing `OptimizationSolver` interface
+2. Create LLM specialist for parameter extraction
+3. Update `solvers/capabilities.py` with subcategories
+4. Add test cases (5-10 examples)
+5. Train classifier on new examples (20+ needed)
+6. Add to solver registry in `solvers/__init__.py`
+
+**Success Metrics** (per problem type):
+- ✅ Solver produces correct solutions on test cases
+- ✅ Parameter extraction accuracy: 85%+
+- ✅ Classification accuracy: 85%+
+
+---
+
+### **PHASE 7: ADVANCED AGENTIC FEATURES** 🚀
+
+**7.1 Multi-Objective Optimization** ⏱️ 3-5 days
+- Detect multiple objectives: "Minimize cost AND carbon emissions"
+- Ask user about priorities or generate Pareto front
+- Visualize trade-offs
+- Let user pick point on Pareto curve
+
+**7.2 Explanation & Education** ⏱️ 2-3 days
+- "Why did you choose this solution?"
+- Explain optimization technique used
+- Show mathematical formulation
+- Offer to teach concepts: "Want to learn about LP?"
+
+**7.3 Autonomous Tool Selection** ⏱️ 3-4 days
+- Agent chooses best solver/algorithm based on problem size
+- Example: "10,000 nodes detected. Recommend Gurobi (fast) vs GLPK (free). Which?"
+- Explain trade-offs: exact vs heuristic, speed vs optimality
+
+**7.4 Sensitivity Analysis Automation** ⏱️ 2-3 days
+- Automatically identify critical parameters
+- Run sensitivity analysis without being asked
+- Report: "Your solution is most sensitive to Seattle capacity and freight costs"
+
+**7.5 Constraint Negotiation** ⏱️ 3-4 days
+- If problem is infeasible: identify conflicting constraints
+- Suggest which constraints to relax
+- "Your demands exceed supply by 50 units. Options: 1) Increase supply, 2) Reduce demand, 3) Allow partial fulfillment"
+
+---
+
+### **IMPLEMENTATION TIMELINE**
+
+**Week 1-2**: Phase 1 - Unblock Classification
+- Collect data (ongoing)
+- Create training scripts
+- Train ML classifiers
+- Integrate into system
+- **Deliverable**: 85-90%+ classification accuracy
+
+**Week 3**: Phase 2 - Clarification Dialogue
+- Create clarification handler
+- Integrate into agent pipeline
+- Add API support
+- **Deliverable**: Agent asks targeted questions for incomplete problems
+
+**Week 4**: Phase 3 - Conversation Memory
+- Implement state management
+- Session handling
+- Context-aware follow-ups
+- **Deliverable**: Multi-turn conversations work
+
+**Week 5**: Phase 4 & 5 - Proactive Analysis + Iterative Refinement
+- Post-solve suggestions
+- Feedback loop
+- Smart modifications
+- **Deliverable**: Interactive improvement workflow
+
+**Week 6-8**: Phase 6 - New Problem Types
+- Assignment (Week 6)
+- Knapsack (Week 7)
+- Network Flow (Week 8)
+- **Deliverable**: 3 additional problem types fully working
+
+**Week 9-10**: Phase 7 - Advanced Features
+- Multi-objective
+- Explanations
+- Tool selection
+- **Deliverable**: Advanced agentic capabilities
+
+---
+
+### **CURRENT STATUS (2025-11-03)**
+
+#### ✅ What Works:
+- Transportation optimization (end-to-end)
+- Scheduling solver (single-stage)
+- Natural language understanding
+- Intent detection and routing
+- Follow-up question handling
+- Dynamic visualizations
+- Web interface with file upload
+
+#### ⚠️ Blockers:
+- **CRITICAL**: Classification accuracy (17-25% on scheduling subtypes)
+  - Waiting for training data (60-120 examples)
+  - Infrastructure ready: feature pipeline + 25 labeling functions
+
+#### 🚧 Next Immediate Actions:
+1. **Check training data status** in Google Sheet
+2. **Create training scripts** (if data ready)
+3. **Train ML classifiers** (2-3 hours)
+4. **Implement clarification handler** (in parallel with training)
+
+---
+
+### **ARCHITECTURE DECISIONS**
+
+#### Hybrid ML + LLM Approach:
+- **ML Classifier**: Fast (<50ms), accurate on trained categories
+- **LLM**: Flexible, handles parameter extraction, explanations, follow-ups
+- **Why both?**: ML for speed/accuracy on classification, LLM for everything else
+
+#### Clarification Questions:
+- Detect missing fields automatically
+- Generate problem-specific questions
+- Limit to 3-5 questions max
+- Use LLM for validation questions
+
+#### Conversation Memory:
+- In-memory for prototyping
+- Later: Redis or database for production
+- Session-based (not global state)
+
+---
+
 ## 2025-10-11
 
 ### Problems Solved

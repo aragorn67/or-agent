@@ -21,20 +21,16 @@ python -m pytest test_llm_refactoring.py -v
 ```
 tests/
 ├── Overall_Test.py                       ⭐ Main demo (6 prompts with reasoning)
-├── test_llm_refactoring.py               44 unit tests
-├── test_complete_workflow.py             End-to-end with plots
-├── test_with_llm_analysis_requests.py    LLM request handling
+├── test_llm_refactoring.py               44 unit tests (all pass)
+├── test_complete_workflow.py             End-to-end with plots (passes)
+├── test_with_llm_analysis_requests.py    LLM request handling (passes)
 │
-├── test_greek_problem.py                 Greek cities example
-├── test_schema_classifier.py             Schema validation
-├── transportation_test_cases.py          Multiple scenarios
-├── test_scheduling_model.py              Scheduling example
-├── test_question_handling.py             Question handling
+├── test_normalizer.py                    Label normalization tests (5 pass)
+├── transportation_test_cases.py          19 test scenarios (data file)
+├── phase1_test_cases.py                  30 classification tests
+├── test_phase1_runner.py                 Classification test runner
 │
-├── debug_classification.py               Debug intent detection
-├── analyze_failures.py                   Analyze test failures
-│
-└── test_output/                          Generated plots
+└── test_output/                          Generated plots (PNG files)
 ```
 
 ---
@@ -90,20 +86,12 @@ Tests LLM understanding of 7 analysis requests:
 
 ---
 
-## Problem-Specific Tests
+## Additional Test Files
 
-- **test_greek_problem.py** - Greek cities transportation
-- **test_schema_classifier.py** - Schema validation tests
-- **transportation_test_cases.py** - Multiple test scenarios
-- **test_scheduling_model.py** - Scheduling optimization
-- **test_question_handling.py** - Question detection tests
-
----
-
-## Debug Utilities
-
-- **debug_classification.py** - Debug intent detection issues
-- **analyze_failures.py** - Analyze test failures and patterns
+- **test_normalizer.py** - Label normalization for classification system (5 tests)
+- **transportation_test_cases.py** - 19 transportation problem scenarios (data file)
+- **phase1_test_cases.py** - 30 problem classification test cases
+- **test_phase1_runner.py** - Runner for classification tests with CLI options
 
 ---
 
@@ -156,9 +144,9 @@ source Tolis_Env/bin/activate
 
 ## Summary
 
-- **11 test files** (cleaned up, removed duplicates)
-- **44 unit tests** (all passing)
-- **3 workflow tests** (with visualizations)
-- **1 main demo** (Overall_Test.py - shows complete reasoning)
+- **7 test files** (cleaned up, removed 6 obsolete tests)
+- **49 unit tests** (44 LLM + 5 normalizer - all passing)
+- **3 workflow tests** (Overall_Test, complete_workflow, llm_analysis - all passing)
+- **2 data files** (transportation scenarios, classification test cases)
 
-Total: ~3,000 lines of test code covering all functionality.
+Total: Clean, focused test suite with all tests passing.

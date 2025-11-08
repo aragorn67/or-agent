@@ -32,97 +32,96 @@ An intelligent optimization agent that understands complex problems described in
 - **Scalable Design**: Ready for production deployment
 - **Web Interface**: Clean, intuitive browser-based interface
 
-## 🏗️ Architecture
+## 🏗️ How It Works: Input → Answer
 
+**You give:** Natural language text describing an optimization problem
+
+**System does:**
+1. **Classify** problem type (transportation, scheduling, etc.) → `or_classify/` or `llm/`
+2. **Extract** parameters (capacities, costs, constraints) → `llm/*_specialist.py`
+3. **Solve** using mathematical optimization → `solvers/`
+4. **Analyze** results and create visualizations → `analysis/`
+5. **Return** solution + explanation + charts
+
+**Data Flow:**
 ```
-┌──────────────────┐    ┌──────────────────┐    ┌──────────────────┐
-│  Web Interface   │───▶│  Optimization    │───▶│    Solvers       │
-│  (FastAPI +      │    │     Agent        │    │  (Pyomo +       │
-│     HTML)        │    │  (Intent Router) │    │     GLPK)       │
-└──────────────────┘    └──────────────────┘    └──────────────────┘
-         │                       │                        │
-         │              ┌──────────────────┐             │
-         └─────────────▶│   Analysis       │◀────────────┘
-                        │    Engine        │
-                        │ (Plots & Stats)  │
-                        └──────────────────┘
-                                 │
-                        ┌──────────────────┐
-                        │  Hybrid          │
-                        │  Classifier      │
-                        │  (LFs + ML)      │
-                        └──────────────────┘
+Text Input → agent/core.py → LLM classifies → Specialist extracts params → Solver optimizes → Analysis plots → Answer
 ```
 
-### 🧱 **Core Components**
+---
 
-1. **🌐 Web Layer** (`api.py`) - FastAPI server with file upload and real-time progress
-2. **🧠 AI Agent** (`agent/core.py`) - Intelligent orchestrator with intent routing
-3. **⚙️ Solvers** (`solvers/`) - Mathematical optimization engines
-   - `transportation_solver.py` - Multi-source distribution problems
-   - `scheduling_solver.py` - Single-stage continuous process scheduling (IPM model)
-   - `capabilities.py` - Solver capability mapping
-4. **🔍 Analysis** (`analysis/`) - Dynamic plotting and sensitivity studies
-5. **🤖 LLM Clients** (`llm/`) - Natural language understanding
-   - `ollama_client.py` - Base LLM client
-   - `intent_router.py` - Intent detection (smalltalk, help, optimization, follow-up)
-   - `follow_up_handler.py` - Deterministic follow-up responses
-   - `*_specialist.py` - Problem-specific parameter extraction
-6. **📊 Hybrid Classifier** (`or_classify/`) - Production-grade classification system
-   - 25 rule-based labeling functions
-   - Feature pipeline (TF-IDF + engineered features)
-   - Ready for ML training
+## 📁 Folder Structure & Purpose
+
+### **Entry Points** (Start here)
+- `tests/` - **Working examples** - run these to see how it works (7 tests, all pass)
+- `api.py` - Web server (FastAPI) - for future chat/web interface
+- `setup.bat` / `setup.sh` - Installation scripts
+- `run.bat` - Quick launcher (Windows)
+
+### **Core System** (Main logic flow)
+- `agent/` - **Main orchestrator**
+  - `core.py` - Entry point, routes all requests (READ THIS FIRST)
+- `llm/` - **Language understanding** (14 files)
+  - `intent_router.py` - Detects: new problem vs question vs analysis
+  - `transportation_specialist.py` - Extracts shipping parameters from text
+  - `scheduling_specialist.py` - Extracts scheduling parameters from text
+  - `ollama_client.py` - Communicates with Ollama LLM
+- `solvers/` - **Mathematical optimization** (7 files)
+  - `transportation_solver.py` - Solves shipping/distribution problems
+  - `scheduling_solver.py` - Solves task scheduling problems
+  - `base.py` - Interface all solvers must implement
+- `analysis/` - **Post-processing**
+  - Creates charts (flow diagrams, cost breakdowns, utilization)
+  - Runs sensitivity analysis
+
+### **Classification System** (Problem type detection)
+- `or_classify/` - **Hybrid classifier** (rules + ML)
+  - `lfs/` - 25 labeling functions (deterministic pattern matching)
+  - `feature_pipeline.py` - Converts text to ML features
+  - `taxonomy.yml` - 9 problem families, 25+ subtypes
+  - **Status:** Works with rules, ML training optional for better accuracy
+
+### **Web Interface** (For future use)
+- `schemas/` - API request/response validation schemas
+- `templates/` - HTML pages for web UI
+- `static/` - CSS/JavaScript (empty, for future use)
+
+### **Configuration**
+- `config.py` - System settings (Ollama host/model, API port)
+- `requirements.txt` - Python dependencies
+- `Claude_Diary.md` - Development log and roadmap
+- `.gitignore` - Excludes Tolis_Env/, __pycache__, etc.
 
 ## 🚦 Quick Start
 
-### Prerequisites
-- Python 3.8+
-- [Ollama](https://ollama.ai/) installed and running
-- GLPK optimization solver
+### **Windows Users:**
+```batch
+setup.bat           # Install (5-10 min, one-time)
+run.bat            # Run tests
+```
+See `INSTALL_WINDOWS.md` for detailed help.
 
-### 🔧 Installation
-
-1. **Clone the repository**
-   ```bash
-   git clone <your-repo-url>
-   cd Optimization-AI-
-   ```
-
-2. **Run setup script**
-   ```bash
-   ./setup.sh
-   ```
-
-   Or manually:
-   ```bash
-   python3 -m venv Tolis_Env
-   source Tolis_Env/bin/activate
-   pip install -r requirements.txt
-   ```
-
-3. **Install GLPK solver**
-   ```bash
-   # Ubuntu/Debian
-   sudo apt install glpk-utils
-
-   # macOS
-   brew install glpk
-   ```
-
-4. **Install and start Ollama**
-   ```bash
-   # Install Ollama (see https://ollama.ai)
-   ollama pull qwen2:7b  # Or any supported model
-   ```
-
-### 🚀 Launch
-
+### **Mac/Linux Users:**
 ```bash
+./setup.sh         # Install
 source Tolis_Env/bin/activate
-uvicorn api:app --reload --host 0.0.0.0 --port 8000
+cd tests
+python Overall_Test.py  # See it work!
 ```
 
-Open your browser to **http://localhost:8000**
+### **Prerequisites:**
+- Python 3.8+ ([python.org](https://python.org))
+- Ollama with qwen2:7b model ([ollama.ai](https://ollama.ai))
+- GLPK solver (see INSTALL_WINDOWS.md)
+
+### **Run the Tests** (Recommended):
+```bash
+cd tests/
+python Overall_Test.py              # Main demo - shows full reasoning
+python test_complete_workflow.py   # Wine distribution example
+python -m pytest test_llm_refactoring.py -v  # 44 unit tests
+```
+See `tests/README.md` for details.
 
 ## 💡 Usage Examples
 
@@ -280,46 +279,27 @@ API_HOST=0.0.0.0
 API_PORT=8000
 ```
 
-### **Adding New Solvers**
-1. Create `solvers/new_problem_solver.py`
-2. Implement `OptimizationSolver` interface:
-   ```python
-   class NewProblemSolver(OptimizationSolver):
-       def solve(self, params: Dict) -> Dict:
-           # Your optimization logic
-           pass
+### **How to Add a New Problem Type**
 
-       def validate_params(self, params: Dict) -> List[str]:
-           # Validation logic
-           pass
+1. **Create solver** in `solvers/your_problem_solver.py`
+   - Implement `OptimizationSolver` interface (see `base.py`)
+   - Add to `solvers/__init__.py`
 
-       def get_example_params(self) -> Dict:
-           # Example parameter structure
-           pass
-   ```
-3. Add to `solvers/__init__.py` registration
-4. Update `solvers/capabilities.py` with supported subcategories
-5. Solver automatically available via API
+2. **Create LLM specialist** in `llm/your_problem_specialist.py`
+   - Extract parameters from natural language
+   - See `transportation_specialist.py` as example
 
-### **Adding Labeling Functions**
-```python
-# or_classify/lfs/custom_lfs.py
-from or_classify.labeling_function import LabelingFunction, LFResult, LFPriority
+3. **Add classification rules** in `or_classify/lfs/your_problem_lfs.py`
+   - Write labeling functions to detect this problem type
+   - See existing LFs for patterns
 
-@LabelingFunction.register
-class MyCustomLF(LabelingFunction):
-    priority = LFPriority.HIGH
+4. **Update capabilities** in `solvers/capabilities.py`
+   - Document what problem subtypes your solver handles
 
-    def apply(self, text: str) -> LFResult:
-        if "custom pattern" in text.lower():
-            return LFResult(
-                label="my_problem_type",
-                confidence=0.95,
-                evidence=["Found custom pattern"],
-                priority=self.priority
-            )
-        return self.abstain()
-```
+5. **Add tests** in `tests/`
+   - Create test cases for your problem type
+
+**See `transportation_solver.py` + `transportation_specialist.py` as complete example.**
 
 ## 📊 Project Status
 
@@ -351,59 +331,35 @@ See `RESUME_WHEN_DATA_READY.md` for:
 - Success metrics
 - Next steps
 
-## 📂 Project Structure
+## 📂 Detailed File Map
 
+**Main execution flow** (in order):
+1. `agent/core.py` - Entry point, orchestrates everything
+2. `llm/intent_router.py` - Classifies user intent
+3. `llm/*_specialist.py` - Extracts structured parameters
+4. `solvers/*_solver.py` - Solves optimization problem
+5. `analysis/engine.py` - Generates visualizations
+
+**Key files to understand:**
+- `agent/core.py` - Start here, 400 lines, main orchestrator
+- `llm/ollama_client.py` - LLM communication, structured output
+- `solvers/transportation_solver.py` - Example solver (Pyomo + GLPK)
+- `or_classify/lfs/` - Classification rules (25 files)
+
+**Complete tree:**
 ```
-Optimization-AI-/
-├── agent/                  # Core agent orchestration
-│   ├── core.py            # Main OptimizationAgent with intent routing
-│   └── __init__.py
-├── solvers/               # Optimization solvers
-│   ├── base.py            # OptimizationSolver interface
-│   ├── transportation_solver.py
-│   ├── scheduling_solver.py
-│   ├── capabilities.py    # Solver capability mapping
-│   ├── ipm_scheduler.py   # IPM model implementation
-│   └── __init__.py
-├── llm/                   # LLM clients and utilities
-│   ├── client.py          # Abstract LLM interface
-│   ├── ollama_client.py   # Ollama implementation
-│   ├── intent_router.py   # Intent detection
-│   ├── follow_up_handler.py
-│   ├── scheduling_specialist.py
-│   ├── transportation_specialist.py
-│   └── ... (14 files total)
-├── or_classify/           # Hybrid classifier infrastructure
-│   ├── taxonomy.yml       # 9 families, 25+ subtypes
-│   ├── aliases.yml        # 50+ synonym mappings
-│   ├── normalizer.py      # Label normalization
-│   ├── labeling_function.py  # LF framework
-│   ├── feature_pipeline.py   # ML feature extraction
-│   └── lfs/               # 25 labeling functions
-│       ├── assignment_lfs.py
-│       ├── scheduling_lfs.py
-│       ├── knapsack_lfs.py
-│       └── ... (7 files total)
-├── analysis/              # Analysis engines
-│   ├── engine.py
-│   ├── detector.py
-│   └── analyzers/         # Problem-specific analyzers
-├── tests/                 # Test suite
-│   ├── README.md
-│   ├── phase1_test_cases.py   # 30 classification tests
-│   ├── test_phase1_runner.py  # Test runner with CLI
-│   └── ... (15 files total)
-├── api.py                 # FastAPI web server
-├── requirements.txt       # Python dependencies
-├── README.md              # This file
-├── Claude_Diary.md        # Development log
-├── RESUME_WHEN_DATA_READY.md  # ML training blocker
-├── docs/                  # Documentation
-│   └── archive/           # Old documentation
-│       ├── ROADMAP.md
-│       └── REFACTORING_SUMMARY.md
-└── archive/               # Unused code
-    └── conversation/      # Old conversation module
+agent/core.py              Main orchestrator (read this first)
+llm/intent_router.py       Detects problem vs question vs analysis
+llm/transportation_specialist.py   Extracts shipping params
+llm/scheduling_specialist.py       Extracts scheduling params
+llm/ollama_client.py       Talks to Ollama LLM
+solvers/transportation_solver.py   Solves shipping problems
+solvers/scheduling_solver.py       Solves scheduling problems
+solvers/base.py            Solver interface
+analysis/engine.py         Creates charts
+or_classify/lfs/           25 classification rules
+tests/Overall_Test.py      Best example to understand flow
+api.py                     Web server (not updated)
 ```
 
 ## 🤝 Contributing
