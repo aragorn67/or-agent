@@ -1,4 +1,23 @@
 # agent/core.py
+"""
+Main Optimization Agent - Entry Point for All Requests
+
+DATA FLOW:
+    Text Input → detect_intent() → classify_problem() → extract_parameters() → solve() → explain() → Output
+
+EXECUTION PATH:
+    1. detect_intent(): Is this smalltalk, help, follow-up, or new optimization problem?
+    2. classify_problem(): What type? (transportation, scheduling, etc.)
+    3. extract_parameters(): Pull out numbers, names, constraints from text
+    4. solve(): Run mathematical optimization (calls solvers/)
+    5. explain(): Generate human-readable explanation
+    6. Return: solution + explanation + optional charts
+
+KEY FUNCTIONS TO READ:
+    - solve_natural_language(): Main entry point (line ~26)
+    - _handle_follow_up(): Handles analysis/modification requests (line ~200)
+    - _map_to_solver(): Routes problem types to solvers (line ~370)
+"""
 from typing import Dict, Any, List, Optional
 from llm.client import LLMClient
 from llm.intent_router import IntentRouter
@@ -8,7 +27,12 @@ from analysis.detector import AnalysisDetector
 from analysis.engine import AnalysisEngine
 
 class OptimizationAgent:
-    """Main agent orchestrating problem solving with intelligent intent routing"""
+    """
+    Main agent orchestrating problem solving with intelligent intent routing.
+
+    This is the brain of the system. It decides what to do with user input and
+    coordinates all the other components (LLM, solvers, analysis engines).
+    """
 
     def __init__(self, llm_client: LLMClient):
         self.llm = llm_client
