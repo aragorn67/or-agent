@@ -1,9 +1,10 @@
 """
-A collection of transportation problem descriptions for testing extraction.
-Each case is a dict with:
-- name: short identifier
-- text: problem description (free text)
-- notes: optional hints about the scenario (unbalanced, integers, forbidden routes, etc.)
+DATA: Transportation Test Cases (Legacy)
+
+PURPOSE: 20+ transportation problem variants for parameter extraction testing
+FORMAT: Dict with name, text, notes (balanced/unbalanced, constraints, etc.)
+USAGE: Standalone test data for transportation solver validation
+NOTE: Consider migrating useful cases to or_problem_repository.py
 """
 
 TEST_CASES = [

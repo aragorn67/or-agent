@@ -1,24 +1,45 @@
 # llm/transportation_specialist.py
 import json
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from .ollama_client import OllamaClient
 
 class TransportationSpecialist:
     """Specialized LLM handler for transportation optimization problems"""
 
-    def __init__(self, ollama_client: OllamaClient):
+    def __init__(self, ollama_client: OllamaClient, knowledge_base=None):
+        """
+        Initialize transportation specialist.
+
+        Args:
+            ollama_client: LLM client for parameter extraction
+            knowledge_base: Optional KnowledgeBase for RAG context
+        """
         self.client = ollama_client
+        self.kb = knowledge_base
 
     def extract_parameters(self, description: str) -> Dict[str, Any]:
         """Extract transportation-specific parameters with deep validation"""
 
-        system = """
-Extract parameters for a Transportation LP. Output STRICT JSON with keys:
+        # Get relevant context from knowledge base if available
+        rag_context = ""
+        if self.kb is not None:
+            try:
+                rag_context = self.kb.get_context(
+                    "transportation problem parameters supply demand cost",
+                    max_tokens=500
+                )
+                if rag_context:
+                    rag_context = f"\n\nRelevant OR knowledge:\n{rag_context}\n"
+            except:
+                pass  # KB not available, continue without RAG
+
+        system = f"""
+Extract parameters for a Transportation LP. Output STRICT JSON with keys:{rag_context}
 - plants: string[] (factories, warehouses, sources)
 - markets: string[] (customers, destinations, demand points)
-- capacity: {plant: number} (how much each plant can produce/supply)
-- demand: {market: number} (how much each market needs)
-- cost: {plant: {market: number}} (per-unit shipping cost from plant to market)
+- capacity: {{plant: number}} (how much each plant can produce/supply)
+- demand: {{market: number}} (how much each market needs)
+- cost: {{plant: {{market: number}}}} (per-unit shipping cost from plant to market)
 - constraints: string[] (optional: special restrictions like "Plant A cannot serve Market X")
 - integer_shipments: boolean (optional, default false - if shipments must be whole numbers)
 - allow_unbalanced: boolean (optional, default false - if total supply != total demand is OK)
@@ -30,7 +51,7 @@ EXTRACTION RULES:
 4. Extract ALL demand values mentioned (e.g., "Chicago needs 300 units")
 5. Extract distance/cost information - convert to per-unit shipping costs
 6. If freight rate given (e.g., "$90 per unit per 1000 miles"), combine with distances
-7. If ANY required piece is missing, return: {"error": "<specific missing information>"}
+7. If ANY required piece is missing, return: {{"error": "<specific missing information>"}}
 8. All numbers must be numeric types, not strings
 """
 

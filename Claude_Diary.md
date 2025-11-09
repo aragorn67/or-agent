@@ -469,734 +469,26 @@ while not user_satisfied:
 
 ---
 
-## 2025-10-11
+## Historical Context (2025-10-11 to 2025-10-18)
 
-### Problems Solved
+**Key milestones** (see full details in git history if needed):
+- 2025-10-11: Test organization, Overall_Test.py creation (862 lines)
+- 2025-10-12: Hybrid classifier design, taxonomy/alias system, 25 labeling functions
+- 2025-10-18: Hierarchical classification, discovered LLM cannot distinguish scheduling subtypes (20-30% accuracy)
 
-1. **Test Organization Issue**
-   - Problem: Tests directory was disorganized with 20 files scattered without clear structure
-   - Solution: Cleaned up to 12 essential files, removed 5 obsolete/duplicate tests
-   - Result: 40% reduction in file count, clear structure established
-
-2. **Documentation Fragmentation**
-   - Problem: 4 separate README files making documentation hard to navigate
-   - Solution: Merged all test documentation into single concise README.md
-   - Result: Single source of truth for test documentation
-
-3. **Output Directory Redundancy**
-   - Problem: 3 separate test output folders (test_output/, test_output_llm_requests/, test_output_overall/)
-   - Solution: Consolidated all plots into single test_output/ directory, updated test files
-   - Result: Simplified output management, all 13 PNG files in one location
-
-4. **Lack of Complete System Demonstration**
-   - Problem: No test showing complete LLM reasoning chain from input to output
-   - Solution: Created Overall_Test.py (862 lines) demonstrating full reasoning for 6 prompts
-   - Result: Clear demonstration of system intelligence and decision-making process
-
-### Accomplishments
-
-#### Major Deliverables
-
-1. **Overall_Test.py** - Complete LLM Reasoning Chain Test
-   - 862 lines of code
-   - Tests 6 different prompt types with full chain-of-thought explanations
-   - Shows: intent detection, confidence scores, processing decisions, visualization reasoning
-   - Demonstrates: optimization solving, deterministic question handling, intelligent visualization selection, sensitivity analysis
-   - Outputs: Console reasoning display + 3 PNG visualizations
-
-2. **Test Suite Cleanup**
-   - Deleted 5 obsolete files: `# test_run.py`, `test_run.py`, `test_direct_solver.py`, `debug_solvers.py`, `debug_units.py`
-   - Retained 11 essential test files covering all functionality
-   - Total: 3,000+ lines of test code, 44 unit tests passing
-
-3. **Documentation Consolidation**
-   - Created single comprehensive README.md in tests/
-   - High-level descriptions without excessive detail
-   - Clear quick-start guide and structure overview
-   - Troubleshooting section included
-
-4. **Repository Organization**
-   - All test materials centralized in tests/ directory
-   - All test outputs in single test_output/ directory
-   - Clear file naming and structure
-   - Updated file paths in affected test files
-
-#### System Capabilities Validated
-
-Through Overall_Test.py, confirmed the platform accomplishes:
-
-1. **Natural Language Understanding**: Parses optimization problems from plain English
-2. **Intelligent Intent Classification**: 4-way classification (smalltalk, help, optimization, follow-up) with 80-95% confidence
-3. **Context-Aware Processing**: Maintains conversation context, distinguishes new problems from follow-ups
-4. **Deterministic Question Handling**: Instant answers for common questions (sub-millisecond, no LLM calls)
-5. **Intelligent Visualization**: Chooses appropriate chart types based on data structure and user intent
-6. **Analytical Reasoning**: Provides business insights, identifies bottlenecks, estimates impact
-
-Example results from test run:
-- Solved European Wine Distribution problem: €4,750 optimal cost
-- Identified 2 bottlenecks (Bordeaux, Tuscany at 100% capacity)
-- Identified 1 inefficiency (Rioja at 45.5% capacity)
-- Estimated €142-€332 savings from 20% capacity increase
-
-### Tasks Completed
-
-#### Test Infrastructure
-- [x] Created Overall_Test.py with 6 comprehensive prompts
-- [x] Added chain-of-thought explanations for all processing decisions
-- [x] Implemented visualization reasoning demonstrations
-- [x] Created laconic README header in Overall_Test.py
-
-#### Test Organization
-- [x] Moved all test files to tests/ directory
-- [x] Moved all documentation to tests/ directory
-- [x] Moved all output directories to tests/ directory
-- [x] Updated import paths in test files
-
-#### Cleanup
-- [x] Deleted 5 obsolete/duplicate test files
-- [x] Deleted 3 redundant README files
-- [x] Consolidated 3 output folders into 1
-- [x] Updated output directory paths in test files
-
-#### Documentation
-- [x] Created single comprehensive tests/README.md
-- [x] Documented all 11 remaining test files with purpose
-- [x] Added quick-start guide
-- [x] Added troubleshooting section
-- [x] Documented test output structure
-
-#### Verification
-- [x] Ran Overall_Test.py successfully (~10 seconds runtime)
-- [x] Generated 3 PNG visualizations (flows, costs, utilization)
-- [x] Verified all 44 unit tests pass in test_llm_refactoring.py
-- [x] Confirmed file structure is clean and organized
-
-### Remaining Tasks
-
-#### High Priority
-- None identified for immediate action
-
-#### Medium Priority
-1. Consider adding more optimization problem types beyond transportation
-2. Evaluate if additional debug utilities are needed
-3. Review if analyze_failures.py is still relevant or can be removed
-
-#### Low Priority
-1. Clean old PNG files from test_output/ if accumulating too many
-2. Consider adding automated cleanup script for test outputs older than X days
-3. Evaluate if test_scheduling_model.py needs expansion
-
-#### Future Enhancements
-1. Add performance benchmarking tests
-2. Add stress tests for large-scale problems
-3. Add tests for edge cases (malformed input, extreme values)
-4. Consider adding integration tests with actual Ollama API
+**Note**: Detailed logs archived. Focus remains on current priorities.
 
 ---
 
-## To Do Next - LLM Problem Classification and Math Extraction
-
-Based on the roadmap update, to complete the "making the LLM able to distinguish problems and extract math" task, here are the remaining items:
-
-### Immediate Remaining Tasks
-
-#### 1. **Optimize Classification Performance**
-- Reduce voting from `n=3` to `n=1` in `problem_classifier.py` for faster response
-- Fine-tune model parameters for better speed/accuracy balance
-
-#### 2. **Integrate Schema-Based Classifier into Conversation System** (HIGHEST PRIORITY)
-- Replace the complex prompt in `ollama_client.py:detect_follow_up_intent()`
-- Use structured classification to detect parameter modifications like "What if I double capacity?"
-- Update `conversation/agent.py` to use new classification system
-
-#### 3. **Extend Parameter Modification Detection**
-- Leverage classification signals to better detect "what-if" scenarios
-- Improve detection of capacity changes, cost modifications, constraint additions
-- Use structured evidence to understand modification intent
-
-#### 4. **Add Constraint Detection for Transportation**
-- Parse forbidden routes ("Antwerp cannot ship to Mons")
-- Detect capacity limits on specific arcs
-- Handle integer shipment requirements
-- Extract distance-based cost calculations
-
-#### 5. **Improve LLM to Become True OR Expert**
-
-##### Phase 1: Problem Type Expansion (Immediate - Next 2-4 weeks)
-- [ ] Add **assignment problems** (worker-task matching)
-- [ ] Add **network flow problems** (max flow, min cost flow)
-- [ ] Implement **integer/binary variable detection**
-- [ ] Add **knapsack problems** (0/1, bounded, unbounded)
-- [ ] Support **production planning** problems
-
-##### Phase 2: Mathematical Extraction Enhancement (Short-term - 1-2 months)
-- [ ] Improve **constraint recognition** (equality vs inequality, logical constraints)
-- [ ] Add **multi-objective optimization** support
-- [ ] Implement **variable type detection** (continuous, integer, binary, semi-continuous)
-- [ ] Add **infeasibility detection** before solving
-- [ ] Implement **redundant constraint identification**
-
-##### Phase 3: Advanced Capabilities (Medium-term - 3-6 months)
-- [ ] Add **nonlinear programming (NLP)** support
-- [ ] Implement **stochastic optimization** (uncertainty modeling)
-- [ ] Add **robust optimization** capabilities
-- [ ] Support **scheduling problems** (job shop, flow shop, project scheduling)
-- [ ] Implement **facility location problems**
-
-##### Domain Knowledge Enhancement
-- [ ] Add **OR terminology understanding** (feasible region, binding constraint, degeneracy, shadow prices)
-- [ ] Implement **ambiguity resolution** ("minimize cost" → which costs?)
-- [ ] Add **domain-specific patterns** (logistics, finance, manufacturing)
-- [ ] Create **problem templates** for common OR patterns
-- [ ] Build **extraction patterns** for each problem type
-
-##### Solution Analysis & Insights
-- [ ] **Explain shadow prices/dual values** in business terms
-- [ ] **Identify trade-offs** between objectives
-- [ ] **Recommend actions** based on solution
-- [ ] **Compare scenarios** side-by-side
-- [ ] **Validate solutions** against business logic
-
-##### Robustness & Error Handling
-- [ ] Add **input validation** (missing data, inconsistencies)
-- [ ] Implement **graceful degradation** for unclear inputs
-- [ ] Add **clarifying question generation** when data is ambiguous
-- [ ] Provide **confidence scores** for extracted parameters
-
-##### Testing & Validation
-- [ ] Test on **standard OR benchmarks** (MIPLIB, NETLIB)
-- [ ] Test on **textbook problems** (Winston, Hillier-Lieberman)
-- [ ] Add **real-world case studies** to test suite
-- [ ] Test with **ambiguous/incomplete problem statements**
-
-### Critical Integration Points
-
-The **most important** remaining work is **#2**: integrating the schema classifier into your conversation system. This will fix the original "parameter modification detection bug" that was identified as critical in your roadmap.
-
-The current conversation system still uses the old complex prompt-based detection, but now you have a much better structured approach that can reliably distinguish between:
-- New optimization problems
-- Parameter modifications to existing problems
-- Analysis requests
-- Basic questions
-
-### Recommendation
-
-Start with optimizing performance (#1) or jump straight into the conversation integration (#2).
-
-Integration (#2) is the highest priority as it addresses the core issue that started this work: fixing parameter modification detection to properly handle user requests like "What if I double Seattle capacity?"
-
----
-
-### Technical Notes
-
-#### File Structure After Cleanup
-```
-tests/
-├── README.md (1 file, concise)
-├── Core Tests: 4 files (Overall_Test.py, test_llm_refactoring.py, test_complete_workflow.py, test_with_llm_analysis_requests.py)
-├── Problem-Specific: 4 files (test_greek_problem.py, test_schema_classifier.py, transportation_test_cases.py, test_scheduling_model.py)
-├── Feature Tests: 1 file (test_question_handling.py)
-├── Debug Utilities: 2 files (debug_classification.py, analyze_failures.py)
-└── test_output/ (13 PNG files)
-```
-
-#### Test Statistics
-- Total Python test files: 11
-- Total lines of test code: ~3,000
-- Unit tests: 44 (all passing)
-- Integration tests: 3 (all working)
-- Main demonstration: 1 (Overall_Test.py)
-
-#### System Requirements Confirmed
-- Python 3.12+
-- Ollama running at http://localhost:11434
-- Model: qwen2:7b
-- Virtual environment: Tolis_Env
-- All dependencies installed via requirements.txt
-
-### Context for Next Session
-
-#### Current State
-The tests directory is now clean and well-organized. All tests are functional and documented. The Overall_Test.py serves as the primary demonstration of system capabilities, showing complete reasoning chains for 6 different prompt types.
-
-#### Key Files for Reference
-1. **tests/Overall_Test.py**: Main demonstration file, start here for understanding system
-2. **tests/README.md**: Complete guide to all tests
-3. **tests/test_llm_refactoring.py**: 44 unit tests, run with pytest
-
-#### If Continuing Development
-- Review remaining debug utilities (debug_classification.py, analyze_failures.py) to determine if still needed
-- Consider expanding problem types beyond transportation
-- Evaluate test coverage for edge cases
-
-#### If User Wants to Run Tests
-```bash
-cd tests/
-source ../Tolis_Env/bin/activate
-python Overall_Test.py  # Main demo
-python -m pytest test_llm_refactoring.py -v  # Unit tests
-```
-
----
-
-**Session Duration**: ~3 hours
-**Primary Focus**: Test organization and documentation
-**Status**: Complete and functional
-
----
-
-## 2025-10-12
-
-### Main Objective: Build Production-Grade Hybrid Classifier System
-
-**Goal**: Replace the current pure-LLM classifier with a robust, maintainable, fast, and continuously-improving hybrid system that combines rule-based labeling functions with lightweight supervised ML.
-
-**Why**: The current LLM-only approach has several limitations:
-1. **Slow**: LLM inference takes ~7-10 seconds per classification (with n=3 voting)
-2. **Expensive**: Every classification requires expensive LLM API calls
-3. **Flaky**: Pure neural approaches can drift with minor wording changes
-4. **Not Explainable**: Can't trace why a classification was made
-5. **Not Testable**: No unit tests for classification logic
-6. **Static**: Doesn't improve over time without retraining entire model
-
-**Solution**: Hierarchical hybrid classifier with:
-- **Labeling Functions (LFs)**: Deterministic, unit-tested rules that handle clear cases
-- **Supervised Model**: Lightweight ML (LogReg/SVM) that learns what rules miss
-- **Conflict Resolution**: Smart policy when LFs and model disagree
-- **Grammar Parsers**: Validate and extract structured problem parameters
-- **Active Learning**: Continuous improvement loop from low-confidence cases
-- **CI/CD**: Performance gates ensure quality never degrades
-
-### Problems Addressed
-
-1. **Pure-LLM Classification Accuracy**
-   - Problem: Current LLM classifier achieved 80% accuracy (24/30 tests passed) with borderline case confusion
-   - Root Cause: LLM struggles with adversarial cases (e.g., "assignment vs transportation" when problem mentions "shipping")
-   - Solution: Hybrid system with high-precision LFs for clear cases + ML for ambiguous cases
-
-2. **Classification Speed & Cost**
-   - Problem: 7-10 seconds per classification; 90 LLM calls for 30 tests = ~10 minutes total
-   - Root Cause: LLM inference with n=3 voting is slow and expensive
-   - Solution: Fast rule-based LFs (~1ms) + lightweight ML (~10-50ms) = 100x faster
-
-3. **Explainability & Debugging**
-   - Problem: When classification fails, impossible to debug why
-   - Root Cause: LLM is a black box
-   - Solution: Logged decision trail showing which LFs fired, model confidence, and resolution logic
-
-4. **Taxonomy Drift**
-   - Problem: No stable problem type taxonomy; aliases handled inconsistently
-   - Root Cause: Schema was ad-hoc, not formalized
-   - Solution: Locked taxonomy.yml with 9 families, subtypes, and comprehensive aliases.yml
-
-5. **No Continuous Improvement**
-   - Problem: System doesn't get better over time
-   - Root Cause: No feedback loop from failures
-   - Solution: Active learning with review notebook for low-confidence cases; retrain model periodically
-
-### Accomplishments
-
-#### Phase 1a: Foundation (Completed)
-
-1. **Hierarchical Taxonomy Design** (`or_classify/taxonomy.yml`)
-   - Defined 9 stable Level-1 families: network_flow, matching_assignment, location_allocation, lot_sizing, knapsack, lp, mip, scheduling, nlp
-   - 25+ subtypes with clear definitions
-   - Examples and near-misses for each to prevent confusion
-   - Non-drifting structure: new problem types map to existing families
-
-2. **Alias Mapping** (`or_classify/aliases.yml`)
-   - 50+ aliases covering common synonyms
-   - Key mappings:
-     - portfolio → knapsack.zero_one_knapsack
-     - transportation → network_flow.min_cost_flow
-     - production_planning → lot_sizing.capacitated_lot_sizing
-   - Handles algorithm names (dijkstra, hungarian, etc.)
-
-3. **Directory Structure**
-   ```
-   or_classify/
-   ├── taxonomy.yml          # Hierarchical problem type taxonomy
-   ├── aliases.yml           # Synonym normalizer
-   ├── lfs/                  # Labeling functions (rules)
-   ├── model_subtypes/       # Subtype classifiers
-   ├── grammar/              # Problem-specific parsers
-   ├── eval/                 # Metrics, augmentation, CI gates
-   └── logs/                 # Classification decision logs
-   ```
-
-#### Phase 1 Test Results (Baseline)
-
-Ran comprehensive test suite with pure-LLM classifier:
-- **Total**: 30 tests (7 categories)
-- **Passed**: 24 (80%)
-- **Failed**: 6 (20%)
-- **Avg Confidence**: 97.5%
-- **Avg Time**: ~7-10 seconds/test
-
-**Test Breakdown by Category**:
-- Assignment: 4/5 (80%)
-- Network Flow: 4/5 (80%)
-- Knapsack: 5/6 (83%)
-- Scheduling: 5/6 (83%)
-- Production Planning: 2/4 (50%)
-- Facility Location: 2/2 (100%)
-- Transportation: 2/2 (100%)
-
-**Key Failures**:
-1. Assignment vs Transportation (shipping terminology confusion)
-2. Min Cost Flow → Transportation (reasonable, very similar)
-3. Investment Selection → Portfolio (reasonable, portfolio IS knapsack)
-4. Employee Shift Scheduling → Assignment (missed temporal aspect)
-5. Multi-product Production → production_planning (not in schema, should be lot_sizing)
-6. Simple Resource Allocation → Knapsack (actually correct classification)
-
-**Objective Extraction** ✅ Working:
-- Successfully extracts: "minimize total_cost", "maximize revenue", "minimize makespan", etc.
-- LLM now returns structured objective: {sense: "minimize", target: "total_cost"}
-
-### Tasks Completed
-
-#### Foundation
-- [x] Designed 9-family hierarchical taxonomy with definitions and examples
-- [x] Created comprehensive alias mapping (50+ entries)
-- [x] Set up or_classify/ directory structure
-- [x] Enhanced classification schema to include objective extraction
-- [x] Created 30-test comprehensive test suite (phase1_test_cases.py + test_phase1_runner.py)
-
-#### Testing Infrastructure
-- [x] Ran baseline LLM classifier tests (80% accuracy achieved)
-- [x] Identified 6 failure cases with root cause analysis
-- [x] Generated timestamped JSON results with full decision logs
-
-### Remaining Tasks (Phase 1b-1d)
-
-#### Phase 1b: Core Infrastructure
-- [ ] **Create alias normalizer** (`normalise_label()` function + 100% test coverage)
-- [ ] **Implement LF framework** (SDK with ABSTAIN, priority, registry, unit test structure)
-- [ ] **Write 25 core LFs** with unit tests (>90% precision each):
-  - ONE_TO_ONE, SUPPLY_AND_DEMAND, ARC_COSTS_PRESENT
-  - BUDGET_SELECT_PROJECTS, ALL_OR_NOTHING_LANGUAGE
-  - MULTI_PERIOD_TOKENS, INVENTORY_BALANCE, SETUP_HOLDING_KEYWORDS
-  - SHIFT_NAMES, WEEKDAYS, COVERAGE_COUNTS
-  - FIXED_CHARGE_OPEN, INTEGRALITY_MENTIONED, etc.
-
-#### Phase 1c: Machine Learning Layer
-- [ ] **Build feature pipeline**: TF-IDF + LF outputs + engineered flags (numeric counts, time tokens, graph tokens)
-- [ ] **Train Level-1 classifier**: LogReg/SVM with calibration; macro-F1 ≥ 90%
-- [ ] **Train subtype classifiers**: One per family with ≥2 subtypes
-- [ ] **Implement conflict resolution**: Policy for LF vs model disagreements
-
-#### Phase 1d: Robustness & Production
-- [ ] **Create grammar parsers**: Validate and extract structured parameters for each problem type
-- [ ] **Build adversarial test augmentation**: Generate 10 variants per test case
-- [ ] **Set up CI pipeline**: Performance gates (macro-F1, hierarchical accuracy thresholds)
-- [ ] **Implement JSONL logging**: Decision trail (PII-safe, includes LFs fired, confidence, chosen label)
-- [ ] **Create AL review notebook**: Jupyter notebook for reviewing low-confidence cases
-
-### Technical Notes
-
-#### Hybrid Classifier Architecture
-
-**Level 1: Labeling Functions (LFs)**
-- Precision: >90% on their slice
-- Return: {label | ABSTAIN}
-- Unit tested with 5-10 positive/negative examples each
-- Fast: ~1ms per LF
-- Examples:
-  - `LF_ONE_TO_ONE`: Detects "exactly one", "each worker does one task" → matching_assignment
-  - `LF_SUPPLY_DEMAND_FLOWS`: Detects nodes/arcs + flow balance → network_flow
-  - `LF_BUDGET_SELECT`: Detects "budget", "select subset", "all-or-nothing" → knapsack
-
-**Level 2: Supervised Model**
-- Input: TF-IDF features + LF outputs (one-hot) + engineered flags
-- Model: Logistic Regression or Linear SVM (fast, explainable)
-- Calibrated: Isotonic or Platt scaling for reliable confidence
-- Trained on: LF-generated labels + hand-labeled gold set
-
-**Level 3: Conflict Resolution**
-- Policy:
-  1. If high-precision LF fires with confidence ≥ τ_high → use LF
-  2. Else if model confidence ≥ τ_model → use model
-  3. Else if tie → return parent family (e.g., knapsack instead of zero_one_knapsack)
-  4. Log all decisions for active learning review
-
-**Level 4: Grammar Validation**
-- After classification, parse problem text into canonical JSON
-- Type-specific grammars enforce structure:
-  - Assignment: binary domains + one-to-one constraints
-  - Min-cost-flow: supply/demand balance + arc capacities
-  - Lot-sizing: inventory balance equation I[t] = I[t-1] + x[t] - d[t]
-- If parse fails → structured error (caught in CI)
-
-#### Durability Policies
-
-**Prevent Drift**:
-- New synonyms → add to aliases.yml (not code)
-- New rules → add LF with unit tests (not prompt engineering)
-- Model retrains only from gold set + accepted AL corrections
-- Any grammar failure → structured error, never silent fallback
-
-**Continuous Improvement**:
-- Weekly: Review lowest-confidence 20 cases
-- Relabel or add LFs as needed
-- Retrain model incrementally
-- CI gates prevent regression (fail if macro-F1 drops >1%)
-
-### Context for Next Session
-
-#### Current State
-- Baseline LLM classifier: 80% accuracy, but slow and not improving
-- Foundation complete: taxonomy.yml + aliases.yml + directory structure
-- 30 comprehensive test cases with results logged
-- Ready to implement LF framework and core rules
-
-#### Next Steps (Immediate)
-1. Complete alias normalizer function with tests
-2. Implement LF SDK (framework for writing and testing LFs)
-3. Write first 10 core LFs (ONE_TO_ONE, SUPPLY_DEMAND, etc.)
-4. Run LFs on 30 test cases to measure coverage
-
-#### Key Files Created
-1. **or_classify/taxonomy.yml**: 9 families, 25+ subtypes, locked taxonomy
-2. **or_classify/aliases.yml**: 50+ synonym mappings
-3. **tests/phase1_test_cases.py**: 30 test cases across 7 categories
-4. **tests/test_phase1_runner.py**: Test runner with detailed output (type, confidence, structure, missing keys)
-5. **test_output/phase1_results_20251012_112059.json**: Baseline LLM results
-
-#### Performance Targets
-- **Accuracy**: ≥95% on test suite (vs 80% baseline)
-- **Speed**: <100ms per classification (vs 7-10 seconds baseline)
-- **Explainability**: 100% of decisions have logged reasoning
-- **Cost**: Near-zero (rules + lightweight ML vs expensive LLM calls)
-
----
-
-**Session Duration**: ~2 hours
-**Primary Focus**: Hybrid classifier architecture design and foundation
-**Status**: Phase 1a complete; Phase 1b ready to start
-
-## 2025-10-12 (Session 2)
-
-### Main Objective: Complete Phase 1b-1c Infrastructure
-
-**Goal**: Build core infrastructure for hybrid classifier - normalizer, LF framework, 25 LFs, and feature pipeline.
-
-### Accomplishments
-
-#### Phase 1b: Core Infrastructure (Completed ✅)
-
-1. **Label Normalizer** (`or_classify/normalizer.py` - 215 lines)
-   - `normalise_label()`: Returns (canonical_label, was_aliased)
-   - `is_valid_label()`: Validate against taxonomy
-   - `get_family()`, `get_subtype()`: Extract label components
-   - `to_family_only()`: Strip subtype for hierarchical classification
-   - Handles case-insensitive matching, hyphens/spaces normalization
-   - Unit tested and verified
-
-2. **Labeling Function Framework** (`or_classify/labeling_function.py` - 293 lines)
-   - Base `LabelingFunction` class with abstract methods
-   - `LFResult` dataclass: label, confidence, evidence, priority
-   - `ABSTAIN` sentinel for non-matching cases
-   - `LFPriority` enum: CRITICAL (1), HIGH (2), MEDIUM (3), LOW (4)
-   - `LFRegistry`: Register, execute, priority-sort LFs
-   - `apply_all()`: Execute all LFs with stop-on-first option
-   - `apply_by_priority()`: Execute until first non-ABSTAIN
-   - Global registry pattern for easy LF management
-   - Unit tested and verified
-
-3. **25 Core Labeling Functions** (`or_classify/lfs/` - 7 files, 873 lines total)
-   
-   **Assignment (3 LFs)** - `assignment_lfs.py`:
-   - `AssignmentKeywordLF` (HIGH): Detects "assign" + one-to-one indicators
-   - `HungarianMethodLF` (CRITICAL): Detects Hungarian algorithm references
-   - `OneToOneMappingLF` (MEDIUM): N-to-N mapping structure detection
-   
-   **Network Flow (5 LFs)** - `network_flow_lfs.py`:
-   - `NetworkFlowKeywordLF` (HIGH): Generic "network flow" detection
-   - `MaxFlowKeywordLF` (CRITICAL): Max flow / Ford-Fulkerson
-   - `ShortestPathKeywordLF` (CRITICAL): Dijkstra / Bellman-Ford / shortest path
-   - `MinCostFlowKeywordLF` (CRITICAL): Min cost flow / MCNF
-   - `TransportationKeywordLF` (HIGH): Transportation problem patterns
-   
-   **Knapsack (4 LFs)** - `knapsack_lfs.py`:
-   - `KnapsackKeywordLF` (CRITICAL): "knapsack" + subtype detection
-   - `PortfolioKeywordLF` (HIGH): Portfolio optimization → knapsack
-   - `ZeroOneKnapsackLF` (MEDIUM): Binary selection + capacity structure
-   - `BinPackingLF` (HIGH): Bin packing patterns
-   
-   **Scheduling (5 LFs)** - `scheduling_lfs.py`:
-   - `SchedulingKeywordLF` (HIGH): Generic "schedule" detection
-   - `JobShopKeywordLF` (CRITICAL): Job shop patterns
-   - `FlowShopKeywordLF` (CRITICAL): Flow shop patterns
-   - `MakespanKeywordLF` (MEDIUM): Makespan objective
-   - `ShiftRosteringLF` (HIGH): Shift rostering / employee scheduling
-   
-   **Location (3 LFs)** - `location_lfs.py`:
-   - `FacilityLocationKeywordLF` (HIGH): Facility location + fixed costs
-   - `PMedianKeywordLF` (CRITICAL): P-median problems
-   - `SetCoverKeywordLF` (CRITICAL): Set cover problems
-   
-   **Lot Sizing (3 LFs)** - `lot_sizing_lfs.py`:
-   - `LotSizingKeywordLF` (CRITICAL): Lot sizing / EOQ keywords
-   - `ProductionPlanningLF` (HIGH): Production planning patterns
-   - `InventoryKeywordLF` (MEDIUM): Inventory + production context
-   
-   **LP/MIP (2 LFs)** - `lp_mip_lfs.py`:
-   - `LinearProgramKeywordLF` (MEDIUM): LP / simplex detection
-   - `MIPKeywordLF` (MEDIUM): MIP / integer programming detection
-
-4. **Feature Pipeline** (`or_classify/feature_pipeline.py` - 258 lines)
-   - **TF-IDF Features**: 500 max features, unigrams + bigrams, English stopwords removed
-   - **LF Features**: One-hot encoding of LF labels + max confidence + num LFs fired
-   - **Engineered Features** (14 total):
-     - `has_numbers`, `has_time_periods`, `has_capacity`, `has_economic_objective`
-     - `has_minimization`, `has_maximization`, `has_inventory`, `has_scheduling`
-     - `has_flow`, `has_assignment`, `word_count`, `comma_count`
-     - `has_binary_vars`, `has_integer_vars`
-   - Returns sparse matrix for memory efficiency
-   - Includes metadata with LF results for explainability
-   - `fit()` / `transform()` pattern for sklearn compatibility
-   - Unit tested and verified (54 features on sample data)
-
-### Tasks Completed
-
-#### Infrastructure Implementation
-- [x] Implemented `normalise_label()` with full alias support (Task 2)
-- [x] Created LF framework with ABSTAIN, priority, registry (Task 3)
-- [x] Wrote 25 core LFs across 7 problem families (Task 4)
-- [x] Built feature pipeline with TF-IDF + LF + engineered features (Task 5)
-
-#### Testing & Verification
-- [x] Unit tested normalizer (5 tests, all passing)
-- [x] Unit tested LF framework (6 tests, all passing)
-- [x] Verified all 25 LFs import correctly
-- [x] Tested feature pipeline on sample data (3 samples → 54 features)
-
-#### Dependencies & Configuration
-- [x] Installed PyYAML 6.0.3 for taxonomy/aliases loading
-- [x] Installed scikit-learn 1.7.2 for TF-IDF and ML
-- [x] Installed scipy 1.16.2 for sparse matrices
-- [x] Updated requirements.txt with ML dependencies
-
-### Remaining Tasks (Phase 1c-1d)
-
-#### Phase 1c: Machine Learning Layer
-- [ ] **Task 6: Train Level-1 classifier** 
-  - **Issue**: Need more training data (currently only 30 test cases)
-  - **Options**: 
-    1. Generate synthetic training data from LF labels
-    2. Use weak supervision (LF outputs as noisy labels)
-    3. Skip ML for now, use pure LF + conflict resolution
-  - **Recommendation**: Skip Task 6 for now, move to Task 8 (conflict resolution)
-
-- [ ] **Task 7: Train subtype classifiers** (SKIPPED - depends on Task 6)
-
-- [ ] **Task 8: Implement conflict resolution policy**
-  - **Feasible NOW**: Can implement with just LFs
-  - **Policy**: Priority-based voting when multiple LFs fire
-  - **Fallback**: Return parent family if no LF fires
-
-#### Phase 1d: Production Readiness
-- [ ] **Task 9: Create grammar parsers** for parameter extraction
-- [ ] **Task 10: Build adversarial test augmentation**
-- [ ] **Task 11: Set up CI with performance gates**
-- [ ] **Task 12: Implement JSONL logging system**
-- [ ] **Task 13: Create Jupyter review notebook**
-
-### Technical Notes
-
-#### Task 7 Analysis: Training Subtype Classifiers
-
-**Objective**: Train one classifier per family to distinguish between subtypes (e.g., knapsack.zero_one vs knapsack.bounded vs knapsack.unbounded).
-
-**Families Requiring Subtype Classifiers** (≥2 subtypes):
-1. **network_flow** (3 subtypes): min_cost_flow, max_flow, shortest_path
-2. **knapsack** (4 subtypes): zero_one_knapsack, bounded_knapsack, unbounded_knapsack, multidimensional_knapsack
-3. **lot_sizing** (3 subtypes): uncapacitated_lot_sizing, capacitated_lot_sizing, multi_product_lot_sizing
-4. **scheduling** (5 subtypes): job_shop, flow_shop, single_machine, shift_rostering, project_scheduling
-5. **location_allocation** (3 subtypes): facility_location, p_median, set_cover
-6. **lp** (2 subtypes): resource_allocation, diet_problem
-7. **mip** (3 subtypes): fixed_charge, piecewise_linear, big_m_logical
-8. **nlp** (3 subtypes): quadratic_programming, convex_nlp, general_nlp
-9. **matching_assignment** (2 subtypes): assignment, bipartite_matching
-
-**Total**: 9 families → 9 subtype classifiers needed
-
-**Training Approach** (when ready):
-1. **Data**: Use Level-1 classifier predictions to filter by family
-2. **Features**: Same pipeline (TF-IDF + LF + engineered)
-3. **Model**: Multi-class LogReg or SVM per family
-4. **Training**: Separate model for each family
-5. **Inference**: Two-stage: Level-1 (family) → Level-2 (subtype)
-
-**Current Blocker**: Insufficient training data (30 samples total, need ~100+ per family for robust training)
-
-**Recommendation for Next Session**:
-- **Option A**: Skip ML tasks (6-7), implement conflict resolution (Task 8) with pure LFs
-- **Option B**: Create training data generator (augment 30 tests → 300+ with paraphrasing)
-- **Option C**: Move to grammar parsers (Task 9) to extract structured parameters
-
-### Files Created This Session
-
-**Core Infrastructure**:
-1. `or_classify/normalizer.py` (215 lines) - Label normalization
-2. `or_classify/labeling_function.py` (293 lines) - LF framework
-3. `or_classify/feature_pipeline.py` (258 lines) - Feature extraction
-
-**Labeling Functions** (873 lines total):
-4. `or_classify/lfs/__init__.py` (54 lines) - Module exports
-5. `or_classify/lfs/assignment_lfs.py` (99 lines) - 3 LFs
-6. `or_classify/lfs/network_flow_lfs.py` (155 lines) - 5 LFs
-7. `or_classify/lfs/knapsack_lfs.py` (139 lines) - 4 LFs
-8. `or_classify/lfs/scheduling_lfs.py` (171 lines) - 5 LFs
-9. `or_classify/lfs/location_lfs.py` (99 lines) - 3 LFs
-10. `or_classify/lfs/lot_sizing_lfs.py` (113 lines) - 3 LFs
-11. `or_classify/lfs/lp_mip_lfs.py` (97 lines) - 2 LFs
-
-**Total**: 11 files, ~1,639 lines of production code
-
-### Context for Next Session
-
-#### Current State
-- **Phase 1a (Foundation)**: ✅ Complete
-- **Phase 1b (Core Infrastructure)**: ✅ Complete (Tasks 1-5)
-- **Phase 1c (ML Layer)**: ⏸️ Blocked on training data (Tasks 6-7)
-- **Phase 1d (Production)**: ⏳ Ready to start (Tasks 8-13)
-
-#### Recommended Next Steps
-
-**Option 1: Skip ML, Go Production-Ready (Fast Path)**
-1. Implement conflict resolution (Task 8) with pure LF voting
-2. Create grammar parsers (Task 9) for parameter extraction
-3. Deploy hybrid classifier with LF-only classification
-4. Collect real usage data for future ML training
-
-**Option 2: Generate Training Data (ML Path)**
-1. Build test case augmentation (Task 10) - paraphrase 30 → 300+ cases
-2. Use augmented data + LF weak supervision to train classifiers (Tasks 6-7)
-3. Then proceed with conflict resolution (Task 8) using ML
-
-**Option 3: Incremental Deployment**
-1. Deploy current LF-only system to production
-2. Log all classifications with confidence scores
-3. Manually review low-confidence cases to build gold dataset
-4. Train ML models once sufficient data collected
-
-**My Recommendation**: **Option 1** - Skip ML for now, implement conflict resolution with LF voting. The 25 LFs provide good coverage, and we can always add ML later when we have real usage data.
-
-#### Key Metrics So Far
-- **LF Coverage**: 25 LFs across 9 families
-- **Code Quality**: All components unit tested
-- **Performance**: ~1ms per LF (vs 7-10s for LLM)
-- **Explainability**: 100% (evidence trails from LFs)
-
----
-
-**Session Duration**: ~4 hours
-**Primary Focus**: Core infrastructure implementation (normalizer, LFs, feature pipeline)
-**Status**: Phase 1b complete; ready for Task 8 (conflict resolution)
-
----
+## Historical Context (2025-10-12)
+
+**Hybrid Classifier Development** (see git history for details):
+- Built 25 labeling functions (LFs) across 9 problem families
+- Created normalizer, LF framework, feature pipeline
+- Baseline: Pure LLM 80% accuracy, 7-10s per classification
+- Infrastructure ready for ML training (blocked on training data)
+
+**Note**: Archived detailed Phase 1b/1c logs. Core infrastructure complete but ML training blocked.
 
 ## 2025-10-18
 
@@ -1486,4 +778,388 @@ single_stage_scheduling test:
 **Session Duration**: ~2 hours
 **Primary Focus**: Hierarchical classification architecture + critical blocker discovery
 **Status**: Architecture complete; ML training now mandatory (was optional)
+
+---
+
+## 2025-11-08
+
+### 🎯 RAG System Implementation (Retrieval-Augmented Generation)
+
+**Goal**: Enhance LLM understanding by giving it access to PhD thesis and OR papers for better problem classification, parameter extraction, and explanations.
+
+#### ✅ Completed Tasks:
+
+**Infrastructure Setup**:
+- ✅ Added RAG dependencies to `requirements.txt`:
+  - `langchain==0.3.7`
+  - `langchain-community==0.3.7`
+  - `chromadb==0.5.20`
+  - `pypdf==5.1.0`
+  - `sentence-transformers==3.3.1`
+- ✅ Created `knowledge/` directory structure:
+  - `knowledge/papers/` - for PDF files
+  - `knowledge/vectorstore/` - auto-generated vector DB
+- ✅ Updated `.gitignore` to exclude PDFs and vectorstore
+
+**Core RAG System**:
+- ✅ Created `llm/knowledge_base.py` (278 lines):
+  - PDF loading from `knowledge/papers/`
+  - Document chunking (1000 chars, 200 overlap)
+  - Vector embeddings using sentence-transformers
+  - ChromaDB storage
+  - Semantic search functionality
+  - Context retrieval for LLM prompts
+
+**Management Tools**:
+- ✅ Created `scripts/manage_knowledge_base.py`:
+  - `build` - Build index from PDFs
+  - `rebuild` - Rebuild index
+  - `stats` - Show status
+  - `search` - Test retrieval
+
+**LLM Integration**:
+- ✅ Modified `llm/transportation_specialist.py`:
+  - Added `knowledge_base` parameter to `__init__()`
+  - Retrieves context before parameter extraction
+  - Query: "transportation problem parameters supply demand cost"
+- ✅ Modified `llm/scheduling_specialist.py`:
+  - Added `knowledge_base` parameter to `__init__()`
+  - Retrieves context before parameter extraction
+  - Query: "scheduling problem makespan processing time changeover"
+- ✅ Modified `llm/enhanced_client.py`:
+  - Accepts `knowledge_base` parameter
+  - Passes KB to all specialists
+
+**Documentation**:
+- ✅ Created `RAG_GUIDE.md` (337 lines):
+  - Complete usage guide
+  - Technical details
+  - Configuration options
+  - Troubleshooting
+- ✅ Created `knowledge/README.md`:
+  - Quick reference for adding PDFs
+  - Management commands
+
+**Sample PDFs for Testing**:
+- ✅ Downloaded 5 industrial OR PDFs (6.6 MB total):
+  1. `intro_to_optimization.pdf` (800 KB) - MIT optimization fundamentals
+  2. `supply_chain_optimization_berkeley.pdf` (333 KB) - Berkeley computational case studies
+  3. `nike_supply_chain_case_study.pdf` (1.8 MB) - Nike responsive supply chain
+  4. `ghsupply_chain_optimization.pdf` (976 KB) - Global health supply chain
+  5. `production_scheduling_case_study.pdf` (2.8 MB) - CMU production scheduling
+
+**RAG Index Built**:
+- ✅ Successfully built vector index:
+  - **373 pages** loaded from 5 PDFs
+  - **719 chunks** created
+  - Saved to `knowledge/vectorstore/`
+- ✅ Verified search works:
+  - Test query "transportation problem" → Found relevant chunks from Berkeley PDF
+  - Test query "production scheduling makespan" → Found relevant chunks from CMU PDF
+
+**Test Integration**:
+- ✅ Modified `tests/Overall_Test.py`:
+  - Loads knowledge base on startup
+  - Passes KB to EnhancedLLMClient
+  - Shows "✓ RAG knowledge base loaded (5 PDFs, 719 chunks)" on init
+
+#### 🔧 Issues Found (Need Fixing Tomorrow):
+
+**Bug in Transportation Specialist**:
+- ❌ F-string formatting error in `llm/transportation_specialist.py:36-42`
+- **Problem**: Lines use `{plant}` and `{market}` inside f-string, Python tries to evaluate as variables
+- **Error**: `name 'plant' is not defined`
+- **Fix needed**: Escape with double braces: `{{plant}}`, `{{market: {{number}}}}`
+- **Location**: Lines 40-42 in prompt template
+
+**Test Status**:
+- ✅ RAG loading works (ChromaDB queries successful)
+- ✅ Knowledge base integration works
+- ❌ Overall_Test.py fails during parameter extraction due to f-string bug
+- ⚠️ ChromaDB telemetry errors (harmless, can be ignored)
+
+#### 📋 TODO for Tomorrow:
+
+**Critical Fixes**:
+1. **Fix f-string bug in `llm/transportation_specialist.py`**:
+   ```python
+   # Line 40-42: Change from
+   - capacity: {plant: number}
+   - demand: {market: number}
+   - cost: {plant: {market: number}}
+
+   # To:
+   - capacity: {{plant: number}}
+   - demand: {{market: number}}
+   - cost: {{plant: {{market: number}}}}
+   ```
+
+**Testing**:
+2. **Run complete test suite**:
+   ```bash
+   cd tests
+   python Overall_Test.py  # Should pass with RAG context
+   python test_complete_workflow.py
+   python test_with_llm_analysis_requests.py
+   ```
+
+3. **Verify RAG is being used**:
+   - Check that LLM prompts include RAG context
+   - Monitor retrieval quality (are relevant chunks being found?)
+   - Test with transportation and scheduling problems
+
+**Optional Enhancements**:
+4. **Add user's PhD thesis**:
+   ```bash
+   cp ~/path/to/thesis.pdf knowledge/papers/
+   python scripts/manage_knowledge_base.py rebuild
+   ```
+
+5. **Optimize RAG settings** (if needed):
+   - Adjust `max_tokens` in specialists (currently 500)
+   - Tune chunk size/overlap if retrieval quality is poor
+   - Test different embedding models if needed
+
+6. **Suppress ChromaDB telemetry warnings**:
+   - Set environment variable or update ChromaDB settings
+   - These are harmless but noisy in output
+
+#### 📊 RAG System Stats:
+
+**Files Created/Modified**: 9 files
+- 3 new files: `llm/knowledge_base.py`, `scripts/manage_knowledge_base.py`, `RAG_GUIDE.md`
+- 3 modified LLM files: `enhanced_client.py`, `transportation_specialist.py`, `scheduling_specialist.py`
+- 1 modified test: `Overall_Test.py`
+- 2 docs: `knowledge/README.md`, `requirements.txt`
+
+**Storage**:
+- PDFs: 6.6 MB
+- Vector DB: ~15-20 MB
+- Embedding model: ~90 MB (cached)
+
+**Performance**:
+- Index build: ~2 minutes (373 pages → 719 chunks)
+- First search: ~1-2 seconds (model loading)
+- Subsequent searches: ~100ms
+
+**Integration Points**:
+- TransportationSpecialist: Queries "transportation problem parameters supply demand cost"
+- SchedulingSpecialist: Queries "scheduling problem makespan processing time changeover"
+- Future specialists: Will automatically get RAG support
+
+---
+
+**Session Duration**: ~3 hours
+**Primary Focus**: Complete RAG system implementation
+**Status**: 95% complete - one f-string bug to fix, then ready for production use
+
+---
+
+## 2025-11-09
+
+### 🎯 Session: RAG Completion, Problem Repository, Test Organization
+
+#### ✅ Completed Tasks:
+
+**RAG System Finalization**:
+- Fixed f-string bugs in `transportation_specialist.py` (lines 40-42, 54)
+- Fixed f-string bugs in `scheduling_specialist.py` (lines 40-46, 56)
+- Built RAG index with 8 PDFs: 5,008 pages → 20,399 chunks
+- Added major textbooks: Ahuja Network Flows (46MB), Floudas Encyclopedia (62MB)
+- Converted .djvu to PDF, extracted .rar archives
+- All tests now run successfully with RAG context
+
+**OR Problem Repository** (`tests/or_problem_repository.py` - 1,184 lines):
+- Created centralized repository: 21 problems across 11 categories
+- Added rich metadata: units, scale, balanced status, tags
+- Added expected_schema: sets, params, vars, objective, constraints
+- Implemented Enums: ProblemCategory, ProblemType
+- Added argparse CLI: `--list`, `--get`, `--category`, `--solvable`
+- Validation functions and helper utilities
+- Comprehensive test harness (`test_classification.py`)
+
+**Test Organization & Documentation**:
+- Renamed tests descriptively:
+  - `Overall_Test.py` → `test_llm_reasoning_chain.py`
+  - `test_complete_workflow.py` → `test_end_to_end_workflow.py`
+  - `test_with_llm_analysis_requests.py` → `test_llm_analysis_understanding.py`
+  - `test_phase1_runner.py` → `test_problem_classification_runner.py`
+- Updated all 7 test headers with actual outputs (laconic format)
+- Documented expected results: accuracy %, confidence, plots, analyses
+- Marked legacy files: `phase1_test_cases.py`, `transportation_test_cases.py`
+- All test descriptions in file headers (NO separate MD files per user request)
+
+**Test Execution Results**:
+- `test_llm_reasoning_chain.py`: ✓ 6 prompts, €4,750, 3 plots, 80-95% confidence
+- `test_end_to_end_workflow.py`: ✓ €4,750, 3 plots, avg €2.79/bottle
+- `test_llm_analysis_understanding.py`: ✓ 7 requests, all follow-ups detected
+- `test_classification.py --solvable`: ✓ 100% accuracy on 4 problems
+- Pytest tests: Import errors (need sys.path fixes)
+
+#### 📊 Current Project State Assessment:
+
+**Strengths** (7/10):
+- Well-organized test structure, clear naming
+- Centralized problem repository with metadata
+- RAG system operational (8 textbooks, 20K+ chunks)
+- Modular LLM architecture (intent routing, specialists, follow-up handler)
+- Good classification capability (transportation, scheduling)
+
+**Weaknesses**:
+- Import path issues (2 pytest tests fail)
+- Test data duplication (legacy files should be migrated/deleted)
+- Slow tests (`test_problem_classification_runner.py` too slow)
+- Limited solver coverage (only transportation + scheduling)
+- RAG integration not demonstrated in tests
+- No error recovery tests
+- No CI/CD pipeline
+
+#### 🎯 Priorities (Added to TODO):
+
+**HIGH PRIORITY**:
+1. Fix import issues - Add `__init__.py` files, use relative imports
+2. Consolidate test data - Migrate/delete `phase1_test_cases.py`, `transportation_test_cases.py`
+3. Speed up tests - Use pytest fixtures, add parallelization
+4. Add CI/CD - GitHub Actions for automated testing
+5. Test RAG integration - Show RAG retrieval → LLM usage in tests
+
+**MEDIUM PRIORITY**:
+6. Expand solver coverage - Add knapsack, assignment solvers
+7. Add performance tests - Track classification speed, solving time
+8. Validation tests - Check plot correctness, solution feasibility
+9. Error handling tests - Test graceful degradation
+
+**LOW PRIORITY**:
+10. Test documentation - pytest-html for reports
+11. Coverage metrics - pytest-cov
+12. Load testing - Concurrent requests
+
+#### 📝 Files Modified:
+- Fixed: 2 specialist files (f-string bugs)
+- Created: `or_problem_repository.py`, `test_classification.py`
+- Renamed: 4 test files
+- Updated: 7 test headers with actual outputs
+- Documentation: Claude_Diary.md
+
+---
+
+**Session Duration**: ~3 hours
+**Primary Focus**: RAG completion, problem repository, test organization, project assessment
+**Status**: Core functionality solid, needs production polish (imports, CI/CD, broader coverage)
+
+---
+
+## 📋 TODO: Development Roadmap
+
+### 🔴 HIGH PRIORITY (Production Blockers)
+
+1. **Fix Import Issues** ⏱️ 1-2 hours
+   - Add `__init__.py` files to all packages (llm/, agent/, solvers/, or_classify/)
+   - Fix sys.path issues in pytest tests
+   - Enable: `test_llm_refactoring.py`, `test_normalizer.py`
+
+2. **Consolidate Test Data** ⏱️ 2-3 hours
+   - Migrate useful cases from `phase1_test_cases.py` to `or_problem_repository.py`
+   - Migrate useful cases from `transportation_test_cases.py` to repository
+   - Delete legacy files after migration
+   - Update `test_problem_classification_runner.py` to use repository
+
+3. **Speed Up Tests** ⏱️ 2-3 hours
+   - Add pytest fixtures for shared LLM client
+   - Implement `@pytest.mark.slow` for slow tests
+   - Add parallelization with pytest-xdist
+   - Target: <5min for full test suite
+
+4. **CI/CD Pipeline** ⏱️ 3-4 hours
+   - Create `.github/workflows/test.yml`
+   - Run tests on push/PR
+   - Check for: test failures, import errors, performance regression
+   - Add status badge to README
+
+5. **Demonstrate RAG Integration** ⏱️ 2-3 hours
+   - Create `test_rag_retrieval.py` showing:
+     - User asks question about OR concept
+     - RAG retrieves relevant textbook section
+     - LLM uses context in response
+   - Add test showing improved parameter extraction with RAG
+   - Document RAG contribution to accuracy
+
+### 🟡 MEDIUM PRIORITY (Expand Capabilities)
+
+6. **Expand Solver Coverage** ⏱️ 2-3 days per solver
+   - **Knapsack Solver**: 0/1, bounded, unbounded variants
+   - **Assignment Solver**: Hungarian algorithm or LP-based
+   - Create specialists: `knapsack_specialist.py`, `assignment_specialist.py`
+   - Add to repository: 5+ problems per type
+   - Test: Classification accuracy ≥85%, solving correctness 100%
+
+7. **Performance Testing** ⏱️ 1-2 days
+   - Create `test_performance.py`:
+     - Classification speed: target <100ms
+     - Parameter extraction: target <2s
+     - Solving time: track by problem size
+   - Add pytest benchmark integration
+   - Set performance regression gates
+
+8. **Solution Validation Tests** ⏱️ 1-2 days
+   - **Plot validation**: Check axes, labels, data ranges
+   - **Solution feasibility**: Verify constraints satisfied
+   - **Optimality checks**: Compare with known solutions
+   - Add to test suite with known-good baseline
+
+9. **Error Handling Tests** ⏱️ 2-3 days
+   - **Connection failures**: Ollama down, timeout
+   - **Malformed input**: Invalid JSON, missing fields
+   - **Infeasible problems**: Supply < demand
+   - **Graceful degradation**: Partial results when possible
+
+### 🟢 LOW PRIORITY (Quality of Life)
+
+10. **Test Documentation** ⏱️ 1 day
+    - Add pytest-html for nice reports
+    - Generate coverage reports with badges
+    - Add timing breakdowns per test
+
+11. **Coverage Metrics** ⏱️ 1 day
+    - Install pytest-cov
+    - Target: ≥80% line coverage
+    - Identify untested code paths
+
+12. **Load Testing** ⏱️ 2-3 days
+    - Test concurrent requests (10, 50, 100 simultaneous)
+    - Identify bottlenecks
+    - Add rate limiting if needed
+
+### 🔵 FUTURE WORK (From Phase Plan)
+
+13. **Clarification Dialogue** (Phase 2) ⏱️ 1 week
+    - Detect missing parameters
+    - Ask targeted questions
+    - Re-extract with user answers
+
+14. **Conversation Memory** (Phase 3) ⏱️ 1 week
+    - Session management
+    - Context across turns
+    - User preference learning
+
+15. **Proactive Analysis** (Phase 4) ⏱️ 1 week
+    - Suggest analyses based on solution
+    - Bottleneck detection
+    - Interactive suggestions
+
+16. **Iterative Refinement** (Phase 5) ⏱️ 1-2 weeks
+    - Feedback collection
+    - Smart modification parsing
+    - Loop until user satisfied
+
+17. **ML Classifier Training** (Phase 1 - Unblocked) ⏱️ 2-3 days
+    - **BLOCKED**: Need 60-120 labeled training examples
+    - When ready: Train scheduling subtype classifier
+    - Target: ≥90% accuracy (vs current 20-30%)
+    - See: `RESUME_WHEN_DATA_READY.md`
+
+---
+
+**Last Updated**: 2025-11-09
+**Next Review**: After completing items 1-5 (high priority)
 

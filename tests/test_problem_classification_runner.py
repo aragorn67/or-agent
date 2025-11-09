@@ -1,7 +1,28 @@
 #!/usr/bin/env python3
 """
-Phase 1 Test Runner - Problem Classification with Detailed Analysis
-Output: Problem type, confidence, JSON structure, missing keys analysis
+TEST: Problem Classification Runner (Phase 1)
+
+PURPOSE: Test classifier on Phase 1 test cases with detailed analysis
+TESTS: Classification → Confidence → JSON structure → Missing keys → Optional solve
+PROBLEMS: phase1_test_cases.py (assignment, knapsack, scheduling, transportation, etc.)
+
+EXPECTED OUTPUT:
+    ✓ Tests all Phase 1 cases across multiple categories
+    ✓ Detailed output per problem: type, confidence, signals, structure
+    ✓ Problem structure analysis (variables, parameters, constraints)
+    ✓ Missing element detection
+    ✓ Optional solving for transportation/scheduling problems
+    ✓ Verification of scheduling solutions
+    ✓ Per-category and overall accuracy summary
+    ✓ JSON output saved to test_output/phase1_results_{timestamp}.json
+
+RUN: python tests/test_problem_classification_runner.py
+REQUIRES: Ollama (localhost:11434), qwen2:7b model
+OPTIONS:
+    --categories SCHEDULING TRANSPORTATION  # Test specific categories only
+    --no-save                               # Don't save JSON results
+NOTE: Uses phase1_test_cases.py (legacy). Consider migrating to or_problem_repository.
+WARNING: This test is slow - tests many problems with detailed analysis
 """
 
 import sys

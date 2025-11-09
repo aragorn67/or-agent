@@ -36,3 +36,7 @@ solutions/
 # Temporary files
 *.tmp
 *.temp
+
+# RAG Knowledge Base
+knowledge/papers/*.pdf
+knowledge/vectorstore/

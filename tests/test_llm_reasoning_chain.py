@@ -1,28 +1,27 @@
 #!/usr/bin/env python3
 """
-═══════════════════════════════════════════════════════════════════════════════
-                            OVERALL SYSTEM TEST
-═══════════════════════════════════════════════════════════════════════════════
+TEST: LLM Reasoning Chain Demonstration
 
-This test demonstrates the COMPLETE LLM reasoning chain for optimization problems
-and analysis requests. For each prompt, it shows:
+PURPOSE: Demonstrates complete LLM reasoning for optimization + follow-ups
+TESTS: Intent classification, follow-up detection, processing decisions, visualizations
+PROBLEM: european_wine_distribution (from or_problem_repository)
+SCENARIO: 6 sequential prompts
+    1. Solve optimization problem
+    2. "What is the objective function?"
+    3. "Show me a plot of the shipment flows"
+    4. "Create a cost breakdown chart"
+    5. "Visualize capacity utilization"
+    6. "What if we increase Bordeaux capacity by 20%?"
 
-    1. User Prompt       → What the user asked
-    2. LLM Understanding → How the LLM interprets it (intent, confidence, reasoning)
-    3. Processing Path   → Which handler processes it (deterministic vs LLM)
-    4. Chain of Thought  → WHY this response/plot was chosen
-    5. Action/Output     → The actual result (answer or visualization)
+EXPECTED OUTPUT:
+    ✓ All 6 prompts classified correctly (90%, 90%, 90%, 80%, 80%, 90%)
+    ✓ Optimal solution: €4,750.00
+    ✓ 3 PNG plots: flows.png, costs.png, utilization.png
+    ✓ Sensitivity analysis response
+    ✓ Final summary showing all prompts processed
 
-PROMPTS:
-    Prompt_1: Optimization problem (European Wine Distribution)
-    Prompt_2: "What is the objective function?" (Question)
-    Prompt_3: "Show me a plot of the shipment flows" (Visualization)
-    Prompt_4: "Create a cost breakdown chart" (Analysis)
-    Prompt_5: "Visualize capacity utilization" (Utilization)
-    Prompt_6: "What if we increase Bordeaux capacity by 20%?" (Modification)
-
-This reveals the INTELLIGENCE of the system - not just results, but HOW it reasons.
-═══════════════════════════════════════════════════════════════════════════════
+RUN: python tests/test_llm_reasoning_chain.py
+REQUIRES: Ollama (localhost:11434), qwen2:7b model
 """
 
 import sys
@@ -30,9 +29,11 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from llm.enhanced_client import EnhancedLLMClient
+from llm.knowledge_base import KnowledgeBase
 from agent.core import OptimizationAgent
 from llm.intent_router import IntentRouter
 from llm.follow_up_handler import FollowUpHandler
+from or_problem_repository import get_problem_by_name
 import matplotlib.pyplot as plt
 import numpy as np
 from datetime import datetime
@@ -230,7 +231,15 @@ Let's begin...
     print_subheader("System Initialization")
 
     try:
-        llm_client = EnhancedLLMClient(host="http://localhost:11434", model="qwen2:7b")
+        # Load RAG knowledge base
+        kb = KnowledgeBase()
+        if kb.index_exists():
+            print("✓ RAG knowledge base loaded (5 PDFs, 719 chunks)")
+        else:
+            print("⚠ RAG knowledge base not built (run: python scripts/manage_knowledge_base.py build)")
+            kb = None
+
+        llm_client = EnhancedLLMClient(host="http://localhost:11434", model="qwen2:7b", knowledge_base=kb)
         agent = OptimizationAgent(llm_client)
         intent_router = IntentRouter(llm_client)
         follow_up_handler = FollowUpHandler(llm_client)
@@ -250,25 +259,9 @@ Let's begin...
 
     print_header("PROMPT 1 - OPTIMIZATION PROBLEM")
 
-    prompt_1 = """
-    A European wine distribution company operates three wineries:
-    - Bordeaux (France) can produce 800 bottles per week
-    - Tuscany (Italy) can produce 650 bottles per week
-    - Rioja (Spain) can produce 550 bottles per week
-
-    They supply four distribution centers:
-    - Amsterdam needs 500 bottles per week
-    - Berlin requires 450 bottles per week
-    - Vienna demands 400 bottles per week
-    - Prague needs 350 bottles per week
-
-    Transportation costs (€ per bottle):
-    Bordeaux to Amsterdam: 2.50, Berlin: 3.20, Vienna: 4.10, Prague: 3.80
-    Tuscany to Amsterdam: 4.50, Berlin: 3.80, Vienna: 2.20, Prague: 2.90
-    Rioja to Amsterdam: 3.80, Berlin: 4.20, Vienna: 3.50, Prague: 3.20
-
-    Minimize the total transportation cost while meeting all demand.
-    """
+    # Get problem from centralized repository
+    problem = get_problem_by_name("european_wine_distribution")
+    prompt_1 = problem["text"]
 
     print_prompt(1, prompt_1.strip(), "Optimization Problem")
 

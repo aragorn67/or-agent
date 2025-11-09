@@ -11,3 +11,10 @@ numpy==2.3.3
 PyYAML==6.0.3
 scikit-learn==1.7.2
 scipy==1.16.2
+
+# RAG System (added 2025-11-08)
+langchain==0.3.7
+langchain-community==0.3.7
+chromadb==0.5.20
+pypdf==5.1.0
+sentence-transformers==3.3.1

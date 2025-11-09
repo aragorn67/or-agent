@@ -1,16 +1,21 @@
 #!/usr/bin/env python3
 """
-Complete Workflow Test with LLM Analysis Requests
+TEST: LLM Analysis Understanding
 
-This test:
-1. Solves an optimization problem
-2. Sends ACTUAL ANALYSIS REQUEST PROMPTS to the LLM
-3. Gets LLM responses for each analysis
-4. Creates plots based on LLM guidance
-5. Tests the follow-up detection and handling
+PURPOSE: Test LLM understanding of follow-up analysis requests
+TESTS: Follow-up detection → Intent classification → LLM responses → Plots
+PROBLEM: european_wine_distribution (from or_problem_repository)
 
-The key difference: We're testing the LLM's ability to understand and respond
-to analysis requests, not just generating plots from data.
+EXPECTED OUTPUT:
+    ✓ 7 analysis requests processed (objective, variables, flows, costs, utilization, modification, capabilities)
+    ✓ All requests correctly identified as follow-ups
+    ✓ Deterministic answers for objective, variables, capabilities questions
+    ✓ 3 visualization plots created
+    ✓ Modification request properly detected
+    ✓ Summary showing all requests completed
+
+RUN: python tests/test_llm_analysis_understanding.py
+REQUIRES: Ollama (localhost:11434), qwen2:7b model
 """
 
 import sys
@@ -21,6 +26,7 @@ from llm.enhanced_client import EnhancedLLMClient
 from agent.core import OptimizationAgent
 from llm.intent_router import IntentRouter
 from llm.follow_up_handler import FollowUpHandler
+from or_problem_repository import get_problem_by_name
 import matplotlib.pyplot as plt
 import numpy as np
 from datetime import datetime
@@ -144,27 +150,11 @@ def main():
     # Step 1: Define the optimization problem
     print_section("STEP 1: Define Optimization Problem")
 
-    problem_description = """
-    A European wine distribution company operates three wineries:
-    - Bordeaux (France) can produce 800 bottles per week
-    - Tuscany (Italy) can produce 650 bottles per week
-    - Rioja (Spain) can produce 550 bottles per week
+    # Get problem from centralized repository
+    problem = get_problem_by_name("european_wine_distribution")
+    problem_description = problem["text"]
 
-    They supply four distribution centers:
-    - Amsterdam needs 500 bottles per week
-    - Berlin requires 450 bottles per week
-    - Vienna demands 400 bottles per week
-    - Prague needs 350 bottles per week
-
-    Transportation costs (€ per bottle):
-    Bordeaux to Amsterdam: 2.50, Berlin: 3.20, Vienna: 4.10, Prague: 3.80
-    Tuscany to Amsterdam: 4.50, Berlin: 3.80, Vienna: 2.20, Prague: 2.90
-    Rioja to Amsterdam: 3.80, Berlin: 4.20, Vienna: 3.50, Prague: 3.20
-
-    Minimize the total transportation cost while meeting all demand.
-    """
-
-    print("Problem: European Wine Distribution")
+    print(f"Problem: {problem['name']}")
     print("-" * 80)
     print(problem_description.strip())
 

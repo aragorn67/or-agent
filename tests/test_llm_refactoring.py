@@ -1,14 +1,25 @@
-# tests/test_llm_refactoring.py
+#!/usr/bin/env python3
 """
-Comprehensive tests for the LLM refactoring.
+TEST: LLM Refactoring Components (Unit Tests)
 
-Tests cover:
-1. Intent routing (smalltalk, help, optimization, follow-ups)
-2. JSON extraction utilities
-3. Follow-up detection and handling
-4. Decimal handling in explanations
-5. Configuration system
-6. Error handling
+PURPOSE: Unit tests for LLM refactoring modules
+TESTS: Intent router, follow-up handler, JSON utils, config, error handling
+FRAMEWORK: pytest
+
+EXPECTED OUTPUT:
+    ✓ All unit tests pass
+    ✓ Intent routing: smalltalk, help, optimization detection
+    ✓ Follow-up handler: deterministic answers for objective/variables/capabilities
+    ✓ JSON utils: extraction from markdown, embedded JSON, error handling
+    ✓ Explanation guard: decimal preservation, grounding checks
+    ✓ Config system: task-specific settings, serialization, overrides
+    ✓ Error handling: Ollama connection/timeout errors
+    ✓ Integration tests: full conversation flow
+    ✓ Transportation scenarios: 10+ real problem descriptions
+
+RUN: pytest tests/test_llm_refactoring.py -v
+REQUIRES: Mock LLM (uses unittest.mock, no Ollama needed)
+STATUS: Import error (ModuleNotFoundError: 'llm') - needs sys.path fix
 """
 
 import pytest

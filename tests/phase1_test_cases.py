@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """
-Phase 1 Test Cases - Problem Type Classification
-Pure data file containing test cases for classification testing
+DATA: Phase 1 Test Cases (Legacy)
+
+PURPOSE: Test cases for problem classification (assignment, knapsack, scheduling, etc.)
+FORMAT: Dict with name, text, expected type, key_elements
+USAGE: Imported by test_problem_classification_runner.py
+NOTE: Consider migrating to or_problem_repository.py for centralized management
 """
 
 # ============================================================================

@@ -1,6 +1,23 @@
+#!/usr/bin/env python3
 """
-Unit tests for Label Normalizer
-Tests core normalization functionality
+TEST: Label Normalizer (Unit Tests)
+
+PURPOSE: Unit tests for label normalization functionality
+TESTS: Canonical labels, alias mapping, case handling, separator normalization
+FRAMEWORK: pytest
+
+EXPECTED OUTPUT:
+    ✓ All normalization tests pass
+    ✓ Canonical labels pass through unchanged
+    ✓ Case-insensitive matching (KNAPSACK → knapsack)
+    ✓ Separator normalization (network-flow → network_flow)
+    ✓ Alias mapping (portfolio → knapsack, transportation → canonical)
+    ✓ Utility methods: is_valid_label, get_family, get_subtype
+    ✓ Convenience function works
+
+RUN: pytest tests/test_normalizer.py -v
+REQUIRES: or_classify.normalizer module
+STATUS: Import error (ModuleNotFoundError: 'or_classify') - needs sys.path fix
 """
 
 import pytest

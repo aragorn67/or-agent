@@ -1,5 +1,5 @@
 # llm/enhanced_client.py
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from .client import LLMClient
 from .ollama_client import OllamaClient
 from .transportation_specialist import TransportationSpecialist
@@ -9,17 +9,31 @@ from .problem_classifier import ProblemClassifier
 class EnhancedLLMClient(LLMClient):
     """Enhanced LLM client with problem-specific specialists"""
 
-    def __init__(self, host: str = "http://localhost:11434", model: str = "qwen2:7b"):
-        self.base_client = OllamaClient(host, model)
+    def __init__(
+        self,
+        host: str = "http://localhost:11434",
+        model: str = "qwen2:7b",
+        knowledge_base=None
+    ):
+        """
+        Initialize enhanced LLM client.
 
-        # Initialize classifier and specialists
+        Args:
+            host: Ollama host URL
+            model: Model name
+            knowledge_base: Optional KnowledgeBase for RAG
+        """
+        self.base_client = OllamaClient(host, model)
+        self.kb = knowledge_base
+
+        # Initialize classifier and specialists (with KB)
         self.classifier = ProblemClassifier(self.base_client)
-        self.transportation = TransportationSpecialist(self.base_client)
-        self.scheduling = SchedulingSpecialist(self.base_client)
+        self.transportation = TransportationSpecialist(self.base_client, knowledge_base)
+        self.scheduling = SchedulingSpecialist(self.base_client, knowledge_base)
 
         # Future specialists can be added here:
-        # self.assignment = AssignmentSpecialist(self.base_client)
-        # self.knapsack = KnapsackSpecialist(self.base_client)
+        # self.assignment = AssignmentSpecialist(self.base_client, knowledge_base)
+        # self.knapsack = KnapsackSpecialist(self.base_client, knowledge_base)
 
     def classify_problem(self, description: str, problem_types: List[str] = None) -> Dict[str, Any]:
         """Classify problem type using structured schema-based classifier"""
