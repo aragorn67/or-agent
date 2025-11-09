@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
 """
-Complete Workflow Test: Optimization + Multiple Analyses + Plots
+TEST: End-to-End Workflow
 
-This script demonstrates a full end-to-end workflow:
-1. Submit a NEW optimization problem (European wine distribution)
-2. Get the solution
-3. Request 4-5 different analyses including 3 plots
-4. Save all plots as PNG files
-5. Display results
+PURPOSE: Test complete workflow from problem submission to visualizations
+TESTS: Solve → Multiple analyses → Generate plots → Save outputs
+PROBLEM: european_wine_distribution (from or_problem_repository)
 
-Problem: European Wine Distribution
-- 3 Wineries in different regions
-- 4 Distribution centers across Europe
-- Minimize transportation costs while meeting demand
+EXPECTED OUTPUT:
+    ✓ Optimal solution: €4,750.00
+    ✓ 3 PNG plots: flow_network.png, cost_breakdown.png, capacity_utilization.png
+    ✓ 2 textual analyses: sensitivity analysis, what-if scenario
+    ✓ Summary with all artifacts listed
+    ✓ Average cost per bottle: €2.79
+
+RUN: python tests/test_end_to_end_workflow.py
+REQUIRES: Ollama (localhost:11434), qwen2:7b model
 """
 
 import sys
@@ -21,6 +23,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from llm.enhanced_client import EnhancedLLMClient
 from agent.core import OptimizationAgent
+from or_problem_repository import get_problem_by_name
 import matplotlib.pyplot as plt
 import numpy as np
 from datetime import datetime
@@ -209,27 +212,11 @@ def main():
     # Step 1: Define the NEW optimization problem
     print_section("STEP 1: Define Optimization Problem")
 
-    problem_description = """
-    A European wine distribution company operates three wineries:
-    - Bordeaux (France) can produce 800 bottles per week
-    - Tuscany (Italy) can produce 650 bottles per week
-    - Rioja (Spain) can produce 550 bottles per week
+    # Get problem from centralized repository
+    problem = get_problem_by_name("european_wine_distribution")
+    problem_description = problem["text"]
 
-    They supply four distribution centers:
-    - Amsterdam needs 500 bottles per week
-    - Berlin requires 450 bottles per week
-    - Vienna demands 400 bottles per week
-    - Prague needs 350 bottles per week
-
-    Transportation costs (€ per bottle):
-    Bordeaux to Amsterdam: 2.50, Berlin: 3.20, Vienna: 4.10, Prague: 3.80
-    Tuscany to Amsterdam: 4.50, Berlin: 3.80, Vienna: 2.20, Prague: 2.90
-    Rioja to Amsterdam: 3.80, Berlin: 4.20, Vienna: 3.50, Prague: 3.20
-
-    Minimize the total transportation cost while meeting all demand.
-    """
-
-    print("Problem: European Wine Distribution")
+    print(f"Problem: {problem['name']}")
     print("-" * 80)
     print(problem_description)
 

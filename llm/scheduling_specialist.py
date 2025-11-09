@@ -6,22 +6,43 @@ from .ollama_client import OllamaClient
 class SchedulingSpecialist:
     """Specialized LLM handler for scheduling optimization problems"""
 
-    def __init__(self, ollama_client: OllamaClient):
+    def __init__(self, ollama_client: OllamaClient, knowledge_base=None):
+        """
+        Initialize scheduling specialist.
+
+        Args:
+            ollama_client: LLM client for parameter extraction
+            knowledge_base: Optional KnowledgeBase for RAG context
+        """
         self.client = ollama_client
+        self.kb = knowledge_base
 
     def extract_parameters(self, description: str) -> Dict[str, Any]:
         """Extract scheduling-specific parameters with deep validation"""
 
-        system = """
+        # Get relevant context from knowledge base if available
+        rag_context = ""
+        if self.kb is not None:
+            try:
+                rag_context = self.kb.get_context(
+                    "scheduling problem makespan processing time changeover",
+                    max_tokens=500
+                )
+                if rag_context:
+                    rag_context = f"\n\nRelevant OR knowledge:\n{rag_context}\n"
+            except:
+                pass  # KB not available, continue without RAG
+
+        system = f"""
 Extract parameters for a Scheduling problem. Output STRICT JSON with keys:
 - orders: string[] (jobs, tasks, orders to be scheduled)
 - units: string[] (machines, resources, processing units)
-- eligible: {order: string[]} (which units can process each order)
-- processing_time: {order: {unit: number}} (time to process order on unit)
-- due_date: {order: number} (deadline for each order)
-- changeover: {unit: {order1: {order2: number}}} (optional - setup/changeover time between orders on same unit)
-- window: {order: 0 or 1} (optional - if 1, order has strict time window)
-- lower: {order: number} (optional - earliest start time for orders with time window)
+- eligible: {{order: string[]}} (which units can process each order)
+- processing_time: {{order: {{unit: number}}}} (time to process order on unit)
+- due_date: {{order: number}} (deadline for each order)
+- changeover: {{unit: {{order1: {{order2: number}}}}}} (optional - setup/changeover time between orders on same unit)
+- window: {{order: 0 or 1}} (optional - if 1, order has strict time window)
+- lower: {{order: number}} (optional - earliest start time for orders with time window)
 - objective: string (optional - "makespan" or "changeover", default "makespan")
 
 EXTRACTION RULES:
@@ -32,7 +53,7 @@ EXTRACTION RULES:
 5. Extract eligibility constraints (e.g., "Order B can only use Unit 1")
 6. Extract changeover/setup times if mentioned (e.g., "switching from A to B takes 0.5 hours")
 7. If time windows mentioned, set window=1 and extract lower bound
-8. If ANY required piece is missing, return: {"error": "<specific missing information>"}
+8. If ANY required piece is missing, return: {{"error": "<specific missing information>"}}
 9. All numbers must be numeric types, not strings
 10. Time units should be consistent (convert to hours if needed)
 
