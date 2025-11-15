@@ -1,41 +1,60 @@
 # solvers/__init__.py
-import importlib
-import pkgutil
-from typing import Dict, Type
+"""
+Solvers package - provides access to all optimization solvers via registry.
+
+NEW ARCHITECTURE:
+    - Use solver_id (specific variant) instead of problem_type (category)
+    - Registry maps solver_id -> solver instance
+    - Old get_solver(problem_type) still works for backward compatibility
+
+USAGE:
+    from solvers.registry import get_solver
+
+    solver = get_solver("transport_basic_bipartite")
+    result = solver.solve(params)
+"""
+
 from .base import OptimizationSolver
+from .registry import (
+    get_solver,
+    list_solvers,
+    get_solver_by_category,
+    solver_exists,
+    get_solver_family,
+    get_default_solver_for_category
+)
 
-# Auto-discover and register all solvers
-_SOLVERS: Dict[str, Type[OptimizationSolver]] = {}
+# Re-export key components
+__all__ = [
+    'OptimizationSolver',
+    'get_solver',
+    'list_solvers',
+    'get_solver_by_category',
+    'solver_exists',
+    'get_solver_family',
+    'get_default_solver_for_category',
+]
 
-def _auto_register_solvers():
-    """Automatically import and register all solver modules"""
-    for _, module_name, _ in pkgutil.iter_modules(__path__):
-        if module_name != 'base':
-            try:
-                module = importlib.import_module(f'solvers.{module_name}')
 
-                # Find solver classes in the module
-                for attr_name in dir(module):
-                    attr = getattr(module, attr_name)
-                    if (isinstance(attr, type) and
-                        issubclass(attr, OptimizationSolver) and
-                        attr != OptimizationSolver):
-                        solver_instance = attr()
-                        _SOLVERS[solver_instance.problem_type] = attr
-            except Exception as e:
-                print(f"Warning: Could not register solver from {module_name}: {e}")
+# Backward compatibility: old get_solver(problem_type)
+# Maps problem_type (category) to default solver_id
+def _get_solver_by_category_compat(problem_type: str) -> OptimizationSolver:
+    """
+    DEPRECATED: Backward compatibility for get_solver(problem_type).
 
-def get_solver(problem_type: str) -> OptimizationSolver:
-    """Get solver instance for problem type"""
-    if not _SOLVERS:
-        _auto_register_solvers()
-
-    if problem_type not in _SOLVERS:
+    Use get_solver(solver_id) instead.
+    """
+    # Map old problem_type (category) to default solver_id
+    solver_id = get_default_solver_for_category(problem_type)
+    if solver_id is None:
         raise ValueError(f"Unknown problem type: {problem_type}")
-    return _SOLVERS[problem_type]()
+    return get_solver(solver_id)
+
 
 def list_problem_types() -> list:
-    """Get all registered problem types"""
-    if not _SOLVERS:
-        _auto_register_solvers()
-    return list(_SOLVERS.keys())
+    """
+    DEPRECATED: List problem categories (for backward compatibility).
+
+    Use list_solvers() instead.
+    """
+    return ["transportation", "scheduling"]

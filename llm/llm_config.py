@@ -49,7 +49,7 @@ class LLMModelConfig:
         timeout: Request timeout in seconds
         stop_sequences: Sequences that stop generation when encountered
     """
-    model: str = "qwen2:7b"
+    model: str = "deepseek-r1:latest"
     host: str = "http://localhost:11434"
     temperature: float = 0.0  # Deterministic by default for optimization tasks
     top_p: float = 0.9

@@ -8,12 +8,64 @@ try:
 except Exception:
     _HAVE_JSONSCHEMA = False
 
-from .schemas import CLASS_ENUM, CLASSIFICATION_SCHEMA
+from .schemas import CLASS_ENUM, SOLVER_ID_ENUM, CLASSIFICATION_SCHEMA
 
+# ============================================================================
+# CONFIGURATION PARAMETERS
+# ============================================================================
+DEFAULT_VOTING_ROUNDS = 5  # Number of classification votes for consensus (higher = more accurate but slower)
+
+# ============================================================================
+# FALLBACK MAPPING: problem_type → solver_id
+# ============================================================================
+# Maps fine-grained problem_type to default solver_id when LLM doesn't provide one
+DEFAULT_SOLVER_BY_TYPE = {
+    # Transportation family
+    "transportation": "transport_basic_bipartite",
+    "min_cost_flow": "transport_basic_bipartite",  # Fallback until we add true min-cost-flow solver
+
+    # Scheduling family
+    "single_stage_scheduling": "single_stage_ipm_scheduling",
+    "single_machine_tardiness": "single_stage_ipm_scheduling",
+}
+
+# ============================================================================
+# PROMPTS
+# ============================================================================
 SYSTEM = """You are an Operations Research problem classifier.
-Infer the problem TYPE from structure, not from keywords.
-- Rely on detected sets, decision domains (binary/integer/continuous), and constraint patterns.
-- Ignore literal mentions like "assignment", "transportation", etc. They may be red herrings.
+
+CRITICAL RULES:
+1. Classify by STRUCTURE, not keywords.
+2. Base your reasoning on sets, decision variables (binary/integer/continuous),
+   constraints, and the objective.
+3. Prefer the problem type whose canonical mathematical formulation best matches
+   the described structure, even if the text uses misleading words.
+
+KEY DISTINCTIONS:
+
+TRANSPORTATION vs MIN-COST FLOW:
+  * Transportation is a BIPARTITE network: flows only from supply nodes (plants,
+    warehouses, origins) to demand nodes (markets, customers, sinks).
+    There are NO intermediate/transshipment nodes.
+  * Min-cost flow uses a GENERAL NETWORK: directed arcs, possible intermediate/
+    transshipment nodes with flow conservation, sometimes arc capacities, possibly
+    multiple commodities. If the description mentions flow conservation at many
+    internal nodes, treat it as min-cost flow (even if it says "transportation").
+
+SINGLE-STAGE vs JOB-SHOP SCHEDULING:
+  * Single-stage (including single-machine or parallel-machine) scheduling:
+    each job has ONE processing step; decisions are about assignment to machines
+    and sequencing on that stage, with capacity and timing constraints.
+  * Job-shop/multi-stage scheduling:
+    each job has a SEQUENCE of operations on different machines, with
+    precedence constraints between operations and machine-specific routing.
+
+GENERAL GUIDELINES:
+- Ignore literal mentions like "assignment", "transportation", "scheduling" etc.
+  They can be red herrings. Use the underlying mathematical structure instead.
+- If the structure does not clearly match any known type, choose the closest one
+  and set solver_id="none".
+
 Output ONLY JSON compliant with the given schema.
 """
 
@@ -23,13 +75,29 @@ USER_TMPL = """Schema (for validation reference):
 Text to classify:
 \"\"\"{text}\"\"\"
 
+CLASSIFICATION CHECKLIST:
+
+For TRANSPORTATION problems, check:
+- Is it BIPARTITE (sources→destinations only)? → problem_type: "transportation", solver_id: "transport_basic_bipartite"
+- Does it have INTERMEDIATE NODES or HUBS? → problem_type: "min_cost_flow", solver_id: "none"
+- Example bipartite: "factories ship to customers", "plants supply markets"
+- Example network: "through distribution centers", "via hubs", "multi-stage"
+
+For SCHEDULING problems, check:
+- How many PROCESSING STAGES per job?
+  * ONE stage (e.g., "process on one of several machines") → problem_type: "single_stage_scheduling", solver_id: "single_stage_ipm_scheduling"
+  * MULTIPLE stages (e.g., "operation 1 then operation 2", "machine sequence") → problem_type: "job_shop", solver_id: "none"
+- Look for: "single stage", "parallel machines", "one operation per job" → single_stage
+- Look for: "operation sequence", "routing", "multi-stage", "precedence between operations" → job_shop
+
 Return fields:
 - problem_type: one of {enum}
 - confidence: 0..1 (epistemic confidence in your classification)
-- signals: a few booleans/numbers/strings capturing structural cues you used
-  e.g., has_one_to_one_assignment, flow_conservation, capacity_limit, selection_under_budget, path_optimality, binary_decisions, continuous_flow, cost_matrix_present, supply_vector_present, demand_vector_present, facility_opening_costs, time_indexing, precedence_constraints, etc.
-- evidence: list of short direct quotes from the text (no paraphrase) tied to the signals
-- why_short: one short sentence (no definitions, no background)
+- solver_id: which specific solver can handle this problem (one of {solver_enum})
+- signals: structural cues you detected (bipartite_structure, transshipment_nodes, num_processing_stages, operation_sequences, etc.)
+- evidence: list of short direct quotes from the text supporting your classification
+- why_short: one short sentence explaining your choice
+- objective: sense (minimize/maximize) and target (what's being optimized)
 """
 
 def _validate(obj: Dict[str,Any]) -> List[str]:
@@ -49,14 +117,22 @@ class ProblemClassifier:
 
     def _classify_once(self, text: str) -> Dict[str,Any]:
         user = USER_TMPL.format(schema=json.dumps(CLASSIFICATION_SCHEMA),
-                                enum=CLASS_ENUM, text=text)
+                                enum=CLASS_ENUM,
+                                solver_enum=SOLVER_ID_ENUM,
+                                text=text)
         out = self.llm._chat(SYSTEM, user, json_mode=True)   # Ollama client must support format=json
         obj = json.loads(out)
         return obj
 
-    def classify(self, text: str, n: int = 3) -> Tuple[Dict[str,Any], List[Dict[str,Any]]]:
-        """Run n votes (low temperature) and return the consensus object + all raw votes."""
-        votes = []
+    def classify(self, text: str, n: int = None) -> Tuple[Dict[str,Any], List[Dict[str,Any]]]:
+        """
+        Run n votes (low temperature) and return the consensus object + all raw votes.
+
+        Uses majority voting on both problem_type AND solver_id, with fallback mapping.
+        """
+        if n is None:
+            n = DEFAULT_VOTING_ROUNDS
+        votes: List[Dict[str, Any]] = []
         for _ in range(n):
             try:
                 v = self._classify_once(text)
@@ -64,19 +140,63 @@ class ProblemClassifier:
                 continue
             v["_errors"] = _validate(v)
             votes.append(v)
-        if not votes:
-            return {"problem_type":"custom_review","confidence":0.0,
-                    "signals":{}, "evidence":[], "why_short":"No valid vote."}, []
 
-        # Majority vote on problem_type among VALID votes; tie-break by mean confidence
+        if not votes:
+            return {
+                "problem_type": "custom_review",
+                "solver_id": "none",
+                "confidence": 0.0,
+                "signals": {},
+                "evidence": [],
+                "why_short": "No valid vote.",
+                "objective": {"sense": "unknown", "target": ""},
+            }, []
+
+        # Prefer fully valid votes, but fall back to all
         valid = [v for v in votes if not v["_errors"]]
         pool = valid or votes
-        counts = Counter(v.get("problem_type","custom_review") for v in pool)
-        top_type, _ = counts.most_common(1)[0]
-        # pick best representative of that type
-        same = [v for v in pool if v.get("problem_type")==top_type]
-        best = max(same, key=lambda v: float(v.get("confidence",0)))
-        # clamp and clean
-        best["confidence"] = float(min(1.0, max(0.0, best.get("confidence",0))))
+
+        # ---------------------------------------------------------------------
+        # 1) Majority vote on problem_type
+        # ---------------------------------------------------------------------
+        type_counts = Counter(v.get("problem_type", "custom_review") for v in pool)
+        top_type, _ = type_counts.most_common(1)[0]
+
+        # All votes that picked that type
+        same_type = [v for v in pool if v.get("problem_type") == top_type]
+        if not same_type:
+            same_type = pool  # Extreme fallback
+
+        # Pick representative by highest confidence
+        best = max(same_type, key=lambda v: float(v.get("confidence", 0.0)))
+
+        # ---------------------------------------------------------------------
+        # 2) Majority vote on solver_id among the winning type
+        # ---------------------------------------------------------------------
+        solver_counts = Counter(v.get("solver_id", "none") for v in same_type)
+        top_solver, _ = solver_counts.most_common(1)[0]
+
+        # Basic sanity for solver_id
+        if top_solver not in SOLVER_ID_ENUM:
+            top_solver = "none"
+
+        # ---------------------------------------------------------------------
+        # 3) Fallback: if solver_id is 'none', infer from problem_type mapping
+        # ---------------------------------------------------------------------
+        if top_solver == "none":
+            mapped = DEFAULT_SOLVER_BY_TYPE.get(top_type, "none")
+            top_solver = mapped
+
+        # ---------------------------------------------------------------------
+        # 4) Clean + clamp
+        # ---------------------------------------------------------------------
+        best["problem_type"] = top_type
+        best["solver_id"] = top_solver
+        best["confidence"] = float(min(1.0, max(0.0, best.get("confidence", 0.0))))
         best.pop("_errors", None)
+
+        # Ensure objective present
+        if "objective" not in best:
+            best["objective"] = {"sense": "unknown", "target": ""}
+
         return best, votes

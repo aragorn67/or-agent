@@ -1,17 +1,49 @@
-# solvers/scheduling_solver.py
+# solvers/scheduling/single_stage_ipm.py
+"""
+Single-Stage Immediate-Precedence Scheduling Solver
+
+Handles single-stage continuous process scheduling with:
+- Multiple parallel units
+- Order-unit eligibility restrictions
+- Sequence-dependent changeovers
+- Due date constraints
+- Optional time windows
+- Makespan or changeover minimization
+
+Based on Immediate-Precedence MILP (IPM) formulation from Section 3.1
+"""
+
 from typing import Dict, List, Any, Tuple
 from pyomo.environ import (
     ConcreteModel, Set, Param, Var, NonNegativeReals, Binary,
     Objective, Constraint, minimize, value, SolverFactory
 )
-from .base import OptimizationSolver
+from ..base import OptimizationSolver
 
 
-class SchedulingSolver(OptimizationSolver):
+class SingleStageIPMSolver(OptimizationSolver):
     """
-    Immediate-Precedence Single-Stage MILP (IPM) Scheduling Solver
-    Based on Section 3.1 implementation for continuous process scheduling
+    Single-stage immediate-precedence scheduling solver.
+
+    Formulation:
+        - Binary assignment variables Y[i,j]: order i assigned to unit j
+        - Binary precedence variables XX[i,i',j]: order i immediately precedes i' on unit j
+        - Continuous completion times C[i]
+        - Makespan Cmax
+
+    Constraints:
+        - Each order assigned to exactly one eligible unit
+        - At most one predecessor/successor per (order, unit) pair
+        - Sequence count consistency
+        - Time-window bounds (optional)
+        - Precedence timing constraints
+        - Due date constraints
+        - Makespan definition
     """
+
+    @property
+    def solver_id(self) -> str:
+        return "single_stage_ipm_scheduling"
 
     @property
     def problem_type(self) -> str:
@@ -19,7 +51,7 @@ class SchedulingSolver(OptimizationSolver):
 
     @property
     def description(self) -> str:
-        return "Single-stage continuous process scheduling with immediate precedence constraints"
+        return "Single-stage immediate-precedence continuous process scheduling"
 
     def validate_params(self, params: Dict[str, Any]) -> List[str]:
         """Validate scheduling problem parameters"""
@@ -58,7 +90,7 @@ class SchedulingSolver(OptimizationSolver):
         return errors
 
     def get_example_params(self) -> Dict[str, Any]:
-        """Return example parameters for scheduling problem"""
+        """Return example scheduling parameters"""
         return {
             "orders": ["O1", "O2", "O3"],
             "units": ["U1", "U2"],
@@ -96,12 +128,27 @@ class SchedulingSolver(OptimizationSolver):
     def solve(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """
         Build & solve the Immediate-Precedence Single-Stage MILP (IPM) with GLPK.
-        Returns JSON-serializable dict (status, objective, assignments, arcs, completion times, Cmax).
+
+        Returns:
+            {
+                "status": "OPTIMAL" | "INFEASIBLE" | ...,
+                "solver_id": "single_stage_ipm_scheduling",
+                "objective": float,
+                "assignments": [{"order": str, "unit": str}, ...],
+                "arcs": [{"pred": str, "succ": str, "unit": str}, ...],
+                "completion": {order: float, ...},
+                "Cmax": float,
+                "objective_type": "makespan" | "changeover"
+            }
         """
-        # Validate first
+        # Validate
         errors = self.validate_params(params)
         if errors:
-            return {"status": "VALIDATION_ERROR", "errors": errors}
+            return {
+                "status": "VALIDATION_ERROR",
+                "solver_id": self.solver_id,
+                "errors": errors
+            }
 
         I: List[str] = [str(x) for x in params["orders"]]
         J: List[str] = [str(x) for x in params["units"]]
@@ -254,7 +301,7 @@ class SchedulingSolver(OptimizationSolver):
         for i in I:
             for j in J:
                 if value(m.Y[i, j]) > 0.5:
-                    assignments.append({"order": i, "unit": j})
+                    assignments.append({"order": str(i), "unit": str(j)})
 
         arcs = []
         for i in I:
@@ -263,13 +310,14 @@ class SchedulingSolver(OptimizationSolver):
                     continue
                 for j in J:
                     if value(m.XX[i, ip, j]) > 0.5:
-                        arcs.append({"pred": i, "succ": ip, "unit": j})
+                        arcs.append({"pred": str(i), "succ": str(ip), "unit": str(j)})
 
-        completion = {i: float(value(m.C[i])) for i in I}
+        completion = {str(i): float(value(m.C[i])) for i in I}
         cmax = float(value(m.Cmax))
 
         return {
             "status": status,
+            "solver_id": self.solver_id,
             "objective": float(value(m.OBJ)),
             "assignments": assignments,
             "arcs": arcs,
@@ -280,16 +328,10 @@ class SchedulingSolver(OptimizationSolver):
 
     # Helper methods for normalization
     def _normalize_matrix_ij(self, d: Dict[str, Any]) -> Dict[Tuple[str, str], float]:
-        """
-        Normalize (i,j) matrices:
-          - accepts {(i,j): val}  OR  {i: {j: val}}
-          - returns flat {(i,j): float(val)}
-        """
-        # flat form?
+        """Normalize (i,j) matrices: {(i,j): val} OR {i: {j: val}} -> flat {(i,j): float}"""
         if all(isinstance(k, tuple) and len(k) == 2 for k in d.keys()):
             return {(str(i), str(j)): float(v) for (i, j), v in d.items()}
 
-        # nested form {i:{j:val}}
         flat: Dict[Tuple[str, str], float] = {}
         for i, inner in d.items():
             if not isinstance(inner, dict):
@@ -299,11 +341,7 @@ class SchedulingSolver(OptimizationSolver):
         return flat
 
     def _normalize_tensor_iip_j(self, d: Dict[str, Any]) -> Dict[Tuple[str, str, str], float]:
-        """
-        Normalize (i,i',j) changeover tensor:
-          - accepts {(i,i',j): val} OR {j: {i: {i': val}}}
-          - returns flat {(i,i',j): float(val)}
-        """
+        """Normalize (i,i',j) changeover tensor: {(i,i',j): val} OR {j: {i: {i': val}}} -> flat"""
         if all(isinstance(k, tuple) and len(k) == 3 for k in d.keys()):
             return {(str(i), str(ip), str(j)): float(v) for (i, ip, j), v in d.items()}
 
@@ -319,9 +357,7 @@ class SchedulingSolver(OptimizationSolver):
         return flat
 
     def _normalize_eligible(self, eligible: Dict[str, Any]) -> Dict[str, List[str]]:
-        """
-        Ensure eligible[i] is a deterministic, sorted list of units.
-        """
+        """Ensure eligible[i] is a deterministic, sorted list of units."""
         norm: Dict[str, List[str]] = {}
         for i, units in eligible.items():
             if not isinstance(units, (list, tuple, set)):

@@ -2,6 +2,200 @@
 
 ---
 
+## 2025-11-11
+
+### 🎯 ML Classifier Training & Evaluation Complete
+
+**Session Goal**: Train and evaluate ML classifier vs LLM for OR problem classification
+
+---
+
+### What We Did
+
+#### 1. Dataset Cleanup & Organization (COMPLETED ✅)
+- **Reorganized knowledge folder** into `ML_approaches/` with two subfolders:
+  - `ML_approaches/ML/` - ML classifier training data (523 instances, 24 types)
+  - `ML_approaches/RAG/` - RAG knowledge base (papers, vectorstore)
+- **Created comprehensive dataset**: `FINAL_ML_DATASET.csv`
+  - 523 total instances across 24 problem types, 11 families
+  - Sources: OR-Library (134), Synthetic (83), Chain-of-Experts (306)
+  - Documentation: `ML_approaches/ML/SOURCES.md`
+- **Updated code references** in:
+  - `llm/knowledge_base.py` → RAG paths
+  - `scripts/train_classifier.py` → ML dataset paths
+  - `scripts/manage_knowledge_base.py` → folder references
+
+#### 2. ML Classifier Training (COMPLETED ✅)
+- **Trained Random Forest classifier** on 523 instances:
+  - Training accuracy: 95.45%
+  - Test accuracy: 75.24% (80/20 split)
+  - Cross-validation: 77.75% ± 3.64%
+- **Saved models**:
+  - `models/problem_classifier.pkl` (3.1MB)
+  - `models/problem_vectorizer.pkl` (38KB)
+- **Fixed stratification issue**: Some classes had only 1 instance, causing train/test split to fail
+
+#### 3. ML Classifier Evaluation on OR Repository (COMPLETED ✅)
+- **Added `--use-ml` flag** to `tests/test_classification.py`
+- **Results**:
+  - Solvable problems (10): **70% accuracy (7/10)**
+  - All problems (27): **44.4% accuracy (12/27)**
+  - Speed: <1ms per classification
+  - Confidence: Low (15-30%)
+
+#### 4. LLM Classifier Investigation (CRITICAL DISCOVERY 🔍)
+- **Initial problem**: `IntentRouter.classify()` gave 0% accuracy (always returned "custom_review")
+- **Root cause**: Schema validation failures silently caught in exception handler
+- **Solution**: Use `ProblemClassifier.classify()` directly instead
+- **LLM Results** (Qwen2.5:7b):
+  - Solvable problems (10): **90% accuracy (9/10)** ✨
+  - All problems (27): **70.4% accuracy (19/27)**
+  - Speed: 3-5 seconds per classification (with n=3 votes)
+  - Confidence: Very high (95%)
+
+#### 5. LLM Tested on Training Data Sample (COMPLETED ✅)
+- Tested on random 50 instances from ML training dataset
+- **Result: 48% accuracy (24/50)**
+- **Key finding**: LLM struggles with LPWP problems (Chain-of-Experts dataset)
+  - Frequently misclassifies as "knapsack" or "lot_sizing"
+  - Pattern: `production_planning → knapsack` (6 times)
+- **LLM excels at**: job-shop, flow-shop, knapsack, transportation
+
+#### 6. Hybrid Classifier Experiments (TESTED 🧪)
+- **Strategy 1**: Use LLM if confidence > threshold, else ML
+  - Result: LLM almost always has 85%+ confidence
+  - Threshold 90%: 74.1% accuracy (slight improvement)
+  - Not much benefit since LLM rarely defers to ML
+
+- **Strategy 2**: Use ML first (fast), LLM if ML uncertain
+  - Started testing but interrupted
+  - Goal: Fast path with ML, accurate path with LLM
+
+---
+
+### Performance Summary
+
+| Test Set | ML Classifier | LLM (Qwen2.5) | Winner |
+|----------|---------------|---------------|--------|
+| **Solvable (10)** | 70% | **90%** | LLM 🏆 |
+| **All OR Repo (27)** | 44% | **70%** | LLM 🏆 |
+| **Training Sample (50)** | ~75% | 48% | ML 🏆 |
+| **Speed** | **<1ms** | 3-5s | ML 🏆 |
+| **Confidence** | 15-30% | **95%** | LLM 🏆 |
+
+**Key Insight**: LLM is **significantly better on real-world OR problems** (70% vs 44%), but slower and struggles with diverse LPWP dataset.
+
+---
+
+### Problems Encountered
+
+#### Problem 1: Stratified Split Failure
+- **Issue**: `train_test_split` with `stratify=y` failed because some classes had only 1 instance
+- **Error**: "The least populated class in y has only 1 member, which is too few"
+- **Solution**: Check min class size, use regular split if <2 instances per class
+- **Code**: Modified `scripts/train_classifier.py` line 204-227
+
+#### Problem 2: IntentRouter Returns "custom_review" (0% Accuracy)
+- **Issue**: All OR problems classified as "custom_review" via `IntentRouter.classify()`
+- **Root cause**: `ProblemClassifier` expects complex schema with many required fields (problem_type, confidence, signals, evidence, why_short, objective). LLM fails to produce valid schema → exception → defaults to "custom_review"
+- **Solution**: Use `ProblemClassifier.classify()` directly, bypassing IntentRouter
+- **Result**: 90% accuracy on solvable problems (vs 0% through IntentRouter)
+
+#### Problem 3: Low ML Accuracy on OR Repository
+- **Issue**: ML classifier only 44% on all problems, 70% on solvable
+- **Root cause**:
+  - Training data includes many LPWP problems (abstract, varied phrasing)
+  - OR repository has clear, structured problem statements
+  - ML trained on noisy data, tested on clean data
+- **Solution**: LLM performs better on real-world problems; use LLM as primary
+
+#### Problem 4: Pandas Not Installed in Tolis_Env
+- **Issue**: `ModuleNotFoundError: No module named 'pandas'`
+- **Solution**: `pip install pandas scikit-learn` in Tolis_Env
+- **Status**: Fixed
+
+---
+
+### Future Steps
+
+#### Immediate (Next Session):
+1. **Fix IntentRouter** to use LLM classifier correctly
+   - Remove broken `classify()` method or fix schema validation
+   - Use `ProblemClassifier.classify()` directly
+   - Update `tests/test_classification.py` to test correctly
+
+2. **Implement Hybrid Classifier** (optional performance optimization)
+   - Strategy: ML first (fast), LLM if ML confidence < 30%
+   - Goal: 70% use ML (~1ms), 30% use LLM (3s) → avg ~900ms
+   - Expected: ~65-68% accuracy with 3x speedup vs LLM-only
+
+3. **Update production code** to use LLM as primary classifier
+   - Modify `agent/core.py` or `llm/intent_router.py`
+   - Route through `ProblemClassifier.classify()` directly
+   - Remove broken IntentRouter path
+
+#### Short-term:
+1. **Add more training data** for confused types:
+   - lot_sizing: 0 → 20+ instances needed
+   - multicommodity_flow: 1 → 10+ instances needed
+   - network_flow: 4 → 15+ instances needed
+
+2. **Improve LPWP classification**:
+   - Analyze why LLM misclassifies LPWP as "knapsack"
+   - Add prompt engineering or few-shot examples
+   - Consider fine-tuning or better prompts
+
+3. **Feature engineering for ML**:
+   - Add bigrams/trigrams ("single stage", "job shop")
+   - Add domain-specific features (keyword counts)
+   - Use embeddings instead of TF-IDF
+
+#### Long-term:
+1. **Ensemble approach**: Combine LLM + ML predictions with voting
+2. **Active learning**: Collect user feedback, retrain model
+3. **Hierarchical classification**: First predict family, then specific type
+4. **Confidence calibration**: ML scores (15-30%) don't reflect actual accuracy (70%)
+
+---
+
+### Files Created/Modified
+
+**Created**:
+- `ML_approaches/ML/FINAL_ML_DATASET.csv` (523 instances)
+- `ML_approaches/ML/SOURCES.md` (complete documentation)
+- `ML_approaches/README.md` (overview of ML and RAG approaches)
+- `models/problem_classifier.pkl` (3.1MB)
+- `models/problem_vectorizer.pkl` (38KB)
+
+**Modified**:
+- `llm/knowledge_base.py` (updated paths to ML_approaches/RAG/)
+- `scripts/train_classifier.py` (fixed stratified split, updated dataset path)
+- `scripts/manage_knowledge_base.py` (updated folder references)
+- `tests/test_classification.py` (added `--use-ml` flag, `test_classification_ml()` function)
+
+**Deleted**:
+- Old `knowledge/` folder (moved to ML_approaches/)
+- Intermediate CSV files (kept only FINAL_ML_DATASET.csv)
+
+---
+
+### Recommendations
+
+**Primary Recommendation**: **Use LLM (ProblemClassifier) as primary classifier**
+- 70% accuracy on real problems (vs ML: 44%)
+- 90% on solvable problems (vs ML: 70%)
+- High confidence (95%) when correct
+- Can explain reasoning (why_short field)
+
+**Optional Optimization**: **Hybrid ML-first approach for speed**
+- Use ML for confident predictions (>30% confidence) → ~70% of cases, <1ms
+- Use LLM for uncertain cases → ~30% of cases, 3s
+- Expected: ~65-68% accuracy at ~900ms avg (3x faster than LLM-only)
+
+**Do NOT use**: `IntentRouter.classify()` - broken, returns "custom_review" always
+
+---
+
 ## 2025-11-03
 
 ### 🎯 Agentic AI Development Roadmap - Complete Plan
@@ -1158,8 +1352,581 @@ single_stage_scheduling test:
     - Target: ≥90% accuracy (vs current 20-30%)
     - See: `RESUME_WHEN_DATA_READY.md`
 
+18. **Large-Scale Optimization** ⏱️ 2-3 weeks
+    - Research heuristics: tabu search, simulated annealing, genetic algorithms
+    - Implement decomposition methods: Benders decomposition, Dantzig-Wolfe
+    - Add problem size thresholds (when to switch from exact to heuristic)
+    - Test on large instances: 1,000+ variables, 10,000+ constraints
+    - Benchmark against commercial solvers (Gurobi, CPLEX)
+    - Add timeout/iteration limits with best-found-so-far results
+
 ---
 
-**Last Updated**: 2025-11-09
-**Next Review**: After completing items 1-5 (high priority)
+## 📌 PROJECT SCOPE (v1.0)
+
+**Supported Problem Types (Full Solve):**
+- ✅ **Transportation**: Min-cost flow with supply/demand constraints
+- ✅ **Scheduling (Single-Stage)**: IPM model, makespan minimization
+
+**Classified But Not Solved:**
+- ⚠️ Assignment, Knapsack, Network Flow, Facility Location, VRP, Set Cover, etc.
+- These are correctly classified and parameters extracted
+- System returns clear error: "Problem type '{type}' is recognized but solver not yet implemented"
+- User gets helpful message with problem structure instead of silent failure
+
+**Design Philosophy:**
+- Better to classify correctly and admit limitation than to solve incorrectly
+- Foundation ready for adding new solvers (modular architecture)
+- Clear roadmap: Knapsack → Assignment → Network Flow → ... (see items 6-7 above)
+
+---
+
+## 2025-11-09 (Session 2)
+
+### 🎯 3-Level Unified Classification System Implementation
+
+**Goal**: Implement hierarchical classification that returns intent → category → expected_type in a single call
+
+**What We Built**:
+
+1. **Enhanced IntentRouter with Unified `classify()` Method** (`llm/intent_router.py:281-386`)
+   - Returns complete classification in one call:
+     ```python
+     {
+       "intent": "optimization|help|smalltalk|follow_up",
+       "intent_confidence": 0.0-1.0,
+       "category": "transportation|scheduling|...|none",
+       "category_confidence": 0.0-1.0,
+       "expected_type": "single_stage_scheduling|transportation|...|none",
+       "type_confidence": 0.0-1.0,
+       "rationale": "short why",
+       "evidence_ids": []
+     }
+     ```
+   - **Level 1**: Intent detection (deterministic heuristics + LLM fallback)
+   - **Level 2**: If optimization → run ProblemClassifier (3-vote ensemble)
+   - **Level 3**: Map problem_type → category using built-in mapping
+
+2. **Problem Type → Category Mapping** (`llm/intent_router.py:349-386`)
+   - Maps specific types to high-level categories:
+     - `single_stage_scheduling`, `job_shop`, `flow_shop` → `scheduling`
+     - `transportation` → `transportation`
+     - `knapsack`, `portfolio` → `knapsack`
+     - etc.
+
+3. **Updated Test Suite** (`tests/test_classification.py`)
+   - Tests all 3 dimensions: intent, category, expected_type
+   - Shows per-dimension accuracy metrics
+   - RAG retrieval display (optional with `--show-rag`)
+   - Comparison mode (`--compare-rag`) to test with/without RAG
+
+**Test Results (10 Solvable Problems)**:
+
+```
+Intent accuracy:    10/10 = 100.0% ✅
+Category accuracy:  10/10 = 100.0% ✅
+Type accuracy:      6/10  = 60.0%  ⚠️
+All-three accuracy: 6/10  = 60.0%  ⚠️
+```
+
+**Detailed Breakdown**:
+
+*Transportation (6 problems)*:
+- ✅ 5/6 correct: All basic transportation problems classified correctly
+- ✗ 1/6 error: `vaccine_cold_chain` (expected: `min_cost_flow`, got: `transportation`)
+  - Has intermediate nodes (distribution centers) but classifier can't distinguish from basic transportation
+
+*Scheduling (4 problems)*:
+- ✅ 1/4 correct: `warehouse_order_picking` correctly identified as `single_stage_scheduling`
+- ✗ 3/4 errors: All classified as `job_shop` instead of `single_stage_scheduling`:
+  - `chemical_batch_production` - multiple reactors, changeover times → misinterpreted as multi-stage
+  - `wafer_processing_single_stage` - despite "single_stage" in name!
+  - `pharmaceutical_packaging_line` - packaging line → misinterpreted as flow shop
+
+**RAG Integration - Current State**:
+- 📚 RAG is loaded and queryable (8 PDFs, 20,399 chunks)
+- **WHERE RAG IS USED**:
+  - ✅ **Specialists** (TransportationSpecialist, SchedulingSpecialist): Use `kb.get_context()` during parameter extraction
+  - ✅ **Test Display**: Shows retrieved chunks in test output for transparency
+  - ✗ **NOT in Classifier**: ProblemClassifier doesn't use RAG for type detection
+
+**RAG's Current Purpose**:
+1. **Parameter Extraction**: Help specialists extract problem parameters correctly
+   - Example: "What is processing time?" → RAG provides context from scheduling textbooks
+   - Query: "scheduling problem makespan processing time changeover"
+2. **Test Transparency**: Show what knowledge was retrieved (for debugging/validation)
+
+**RAG is NOT used for**:
+- ❌ Problem type classification (single_stage vs job_shop distinction)
+- ❌ This is why classification accuracy is only 60% despite having RAG!
+
+### 🔍 Issues & Root Causes
+
+**Issue #1: Single-Stage vs Multi-Stage Confusion (3 errors)**
+
+The classifier struggles to distinguish `single_stage_scheduling` from `job_shop`:
+
+**Key Differences** (from repository definitions):
+- **Single-stage**: Each job has ONE operation, assigned to ONE machine
+  - Example: "Order A: 2 hours on Reactor 1 OR 3 hours on Reactor 2" (choose one)
+  - Characteristics: eligible machines, one operation per job
+- **Job-shop**: Each job has MULTIPLE operations in sequence
+  - Example: "Job 1: M1 (2h) → M2 (3h) → M3 (1h)" (must do all)
+  - Characteristics: routing/precedence, multiple operations per job
+
+**Why Classifier Fails**:
+1. Prompts in `problem_classifier.py` don't emphasize this distinction
+2. Presence of multiple machines → classifier assumes multi-stage
+3. Changeover times → classifier assumes complex routing
+4. LLM (qwen2:7b) may lack scheduling domain knowledge
+
+**Issue #2: Transportation vs Min-Cost-Flow (1 error)**
+
+Can't distinguish basic transportation from min-cost-flow:
+- **Transportation**: Bipartite (sources → sinks), no intermediate nodes
+- **Min-Cost-Flow**: Network with intermediate nodes, flow conservation at hubs
+
+**Issue #3: RAG Not Used During Classification**
+
+Currently RAG is only used in tests for display purposes. The actual `ProblemClassifier` doesn't query the knowledge base during classification.
+
+### 📊 RAG Impact Testing Results
+
+**Classification Test** (`python tests/test_classification.py --solvable --compare-rag`):
+- Status: Running (takes ~20 minutes for 10 problems × 2 runs)
+- Expected: No difference (RAG not used in classifier)
+
+**Parameter Extraction Test** (`python tests/test_rag_parameter_extraction.py`):
+
+**Results - 4 problems (2 transport + 2 scheduling)**:
+
+```
+WITHOUT RAG:
+  Complete: 0/4 = 0.0%
+  Partial:  2/4 = 50.0%  (extracted some params, missing others)
+  Failed:   2/4 = 50.0%  (f-string errors in scheduling specialist)
+
+WITH RAG:
+  Complete: 0/4 = 0.0%
+  Partial:  0/4 = 0.0%
+  Failed:   4/4 = 100.0%  (2 timeouts + 2 errors)
+
+IMPACT: ❌ RAG makes it WORSE
+  - 2 transport problems: WITHOUT RAG = partial, WITH RAG = timeout (60s)
+  - 2 scheduling problems: Same f-string error in both cases
+```
+
+**Key Findings**:
+
+1. **RAG Causes Timeouts** ⚠️
+   - Adding RAG context to prompts exceeds 60s timeout
+   - RAG retrieval (~500 tokens) + problem text → too slow for qwen2:7b
+   - Makes extraction go from "partial success" to "complete failure"
+
+2. **Underlying Bugs in Specialists** 🐛
+   - TransportationSpecialist: Missing output fields (sources, sinks, supply, costs)
+   - SchedulingSpecialist: f-string formatting error
+   - RAG doesn't fix these - just adds overhead
+
+3. **RAG Provides No Value Currently** ❌
+   - Doesn't improve accuracy (bugs remain)
+   - Causes timeouts (makes things worse)
+   - Even if it worked, unclear if textbook context helps parameter extraction
+
+**Conclusion**: RAG is currently **harmful, not helpful**. Need to fix specialists first before reconsidering RAG.
+
+### 💡 Proposed Solutions
+
+**Solution 1: Improve Classification Prompts (MOST EFFECTIVE)** ⏱️ 1-2 hours
+- **Why this over RAG**: LLM already knows definitions, problem is structural inference
+- Analysis shows classifier misses structural cues:
+  - "Order A: Reactor 1 **OR** Reactor 2" → Should recognize "OR" = single operation
+  - Changeover times → Wrongly assumes multi-stage routing
+- Fix by adding explicit parsing rules to prompt
+- Add explicit distinction criteria to `problem_classifier.py:SYSTEM`:
+  ```
+  CRITICAL DISTINCTIONS:
+  - single_stage_scheduling: ONE operation per job (may choose which machine)
+  - job_shop: MULTIPLE operations per job in sequence
+  - transportation: bipartite sources→sinks, no intermediate nodes
+  - min_cost_flow: network with intermediate nodes, flow conservation
+  ```
+
+**Solution 2: Add Few-Shot Examples** ⏱️ 2-3 hours
+- Include 2-3 examples per problem type in classification prompt
+- Use or_problem_repository.py examples
+- Show correct classification with reasoning
+- **Effectiveness**: High - gives LLM concrete examples of structural patterns
+
+**Solution 3: Rule-Based Preprocessing** ⏱️ 1 hour
+- Add deterministic checks before LLM:
+  - If contains "OR"/"either"/"choose" → likely single-stage
+  - If contains "→"/"then"/"followed by" → likely multi-stage
+  - If mentions "intermediate nodes"/"hubs" → min-cost-flow not transportation
+- **Effectiveness**: Very high for clear cases, fast (<1ms)
+
+**Solution 4 (NOT RECOMMENDED): Integrate RAG into Classifier**
+- **Why not**: LLM already knows problem type definitions from training data
+- **Real problem**: Structural inference ("OR" = choice), not missing knowledge
+- **Better alternatives**: Solutions 1-3 above
+- **When RAG would help**: If we had domain-specific problem variants not in training data
+  - Example: "single-stage with eligible machines and sequence-dependent setups"
+  - This is NOT our current problem (classifier misses obvious "OR" keywords)
+
+**Impact Analysis: Adding More to RAG**
+
+**For Classification**: ❌ Minimal impact
+- LLM already knows: "job-shop = multiple operations in sequence"
+- Problem is: LLM doesn't parse "OR" correctly in problem text
+- More textbook definitions won't fix structural parsing
+
+**For Parameter Extraction**: ✅ Still beneficial!
+- Helps specialists understand domain terminology
+- Example: "What is setup time vs changeover time?"
+- Example: "What does 'eligible machines' mean?"
+
+**Recommended Priority**:
+1. ~~Solution 1: Improve prompts~~ - Limited impact (LLM still confused)
+2. ~~Solution 3: Add keyword rules~~ - Brittle heuristics
+3. ~~Solution 2: Few-shot examples~~ - Still relies on flawed LLM
+4. ~~Solution 4: RAG integration~~ - **TESTED: Makes things worse!**
+
+### 🎯 RECOMMENDED NEXT STEP: Train ML Classifier
+
+**Why ML Instead of LLM**:
+- ✅ **Fast**: <50ms vs 2-5s per problem
+- ✅ **Accurate**: 85-90%+ (from Phase 1 plan)
+- ✅ **Deterministic**: Same input → same output
+- ✅ **No timeouts**: No RAG, no slow inference
+- ✅ **Infrastructure ready**: Labeling functions already exist (25 LFs in `or_classify/`)
+
+**Action Items** ⏱️ 1-2 days:
+
+1. **Collect Training Data** (if not done already)
+   - Source: Public OR problem datasets (OR-Library, MIPLIB, TSPLIB)
+   - OR: Use `or_problem_repository.py` + generate synthetic variants
+   - Target: 100-200 labeled problems
+   - Categories needed: transportation, scheduling (single-stage vs job-shop), assignment, knapsack
+
+2. **Train Level-1 Classifier** (category detection) ⏱️ 2-3 hours
+   - Features: Existing 25 labeling functions in `or_classify/lfs/`
+   - Model: Logistic Regression or Random Forest
+   - Target: 90%+ accuracy on categories (TRANSPORTATION, SCHEDULING, etc.)
+   - File: `scripts/train_level1_classifier.py`
+
+3. **Train Scheduling Subtype Classifier** (CRITICAL) ⏱️ 2-3 hours
+   - Purpose: Distinguish single_stage vs job_shop vs flow_shop
+   - Features:
+     - Keyword-based: "OR"/"either" (single-stage), "→"/"then" (multi-stage)
+     - Count-based: operations per job, precedence constraints
+     - Structural: routing patterns
+   - Model: Decision Tree (interpretable) or SVM
+   - Target: 85%+ accuracy on scheduling subtypes
+   - File: `scripts/train_scheduling_subtype_classifier.py`
+
+4. **Integrate ML Classifier** ⏱️ 2 hours
+   - Modify `llm/problem_classifier.py` to use ML first
+   - Hybrid approach: ML (fast) → LLM fallback (if confidence < 0.7)
+   - Update `IntentRouter.classify()` to call ML classifier
+
+5. **Test & Validate** ⏱️ 1 hour
+   - Run `python tests/test_classification.py --solvable`
+   - Target: 85-90% type accuracy (vs current 60%)
+   - Measure: Inference time <100ms (vs current 5-10s)
+
+**Public OR Datasets to Use**:
+- **OR-Library**: http://people.brunel.ac.uk/~mastjjb/jeb/info.html
+  - Job shop, flow shop, assignment, knapsack problems
+- **MIPLIB**: https://miplib.zib.de/
+  - Mixed-integer programming benchmarks (various types)
+- **TSPLIB**: http://comopt.ifi.uni-heidelberg.de/software/TSPLIB95/
+  - TSP, VRP variants
+- **Scheduling Benchmark**: http://schedulingbenchmarks.org/
+  - Single-machine, job-shop, flow-shop instances
+
+**Fallback if no public data**:
+- Use GPT-4/Claude to generate synthetic problems from templates
+- Verify with domain expert (user)
+- Bootstrap from `or_problem_repository.py` (currently 28 problems)
+
+---
+
+## 2025-11-09 (Session 3) - ML Training Dataset Creation ✅
+
+### 🎯 Goal
+Create at least 100 labeled OR problem instances for training an ML classifier to replace the slow, inaccurate LLM-based classifier.
+
+### ✅ Accomplishments
+
+#### 1. Dataset Collection (153 instances - 53% above goal!)
+
+**Sources Found & Used**:
+
+1. **OR-Library** ✅ Used
+   - URL: https://people.brunel.ac.uk/~mastjjb/jeb/orlib/
+   - Downloaded: `jobshop1.txt` (82 instances) + `flowshop1.txt` (31 instances)
+   - **Total: 113 instances**
+   - License: Public domain
+
+2. **Synthetic Instances** ✅ Generated
+   - Single-stage scheduling: 25 instances (5 phrasing templates)
+   - Transportation: 15 instances (3 phrasing templates)
+   - **Total: 40 instances**
+   - Purpose: Fill gaps (OR-Library has no single-stage scheduling)
+
+3. **DSLIB (Decision Scheduling Library)** ✅ Discovered
+   - Location: `knowledge/DSLIB/`
+   - Project scheduling (RCPSP): 203 instances
+   - Format: Excel files + PDFs + ProTrack files
+   - **Available for future expansion** (different problem type)
+
+4. **Mathprog-ORlib** 📋 Identified
+   - URL: https://andreas-ernst.github.io/Mathprog-ORlib/
+   - Personnel scheduling: 137 instances
+   - Vehicle scheduling: 60 instances
+   - **Available for future expansion**
+
+**Final Dataset**: `knowledge/ml_training_dataset.csv`
+```
+Total: 153 instances
+- Job-shop scheduling: 82 (53.6%) [OR-Library]
+- Flow-shop scheduling: 31 (20.3%) [OR-Library]
+- Single-stage scheduling: 25 (16.3%) [Synthetic]
+- Transportation: 15 (9.8%) [Synthetic]
+```
+
+#### 2. Scripts Created
+
+**`scripts/build_training_dataset.py`** (365 lines)
+- Downloads OR-Library files (`jobshop1.txt`, `flowshop1.txt`)
+- Parses structured format → natural language descriptions
+- Creates CSV with labeled instances
+- Output: 113 instances from OR-Library
+
+**`scripts/add_synthetic_instances.py`** (230 lines)
+- Generates single-stage scheduling instances (25)
+  - 5 templates: "choose which machine", "assign to machines", "eligible machines", "parallel processing", "unrelated machines"
+  - Critical for training: LLM struggles with job-shop vs single-stage distinction
+- Generates transportation instances (15)
+  - 3 templates: warehouses→customers, factories→markets, centers→stores
+- Merges with OR-Library data
+- Output: 153 total instances
+
+#### 3. Documentation Created
+
+**`knowledge/DATASET_README.md`**
+- Complete usage guide
+- Dataset schema documentation
+- Training examples with sklearn
+- Maintenance instructions
+
+**`knowledge/ML_TRAINING_SUMMARY.md`**
+- Project summary
+- Performance expectations (90% acc, <50ms latency)
+- Next steps and recommendations
+
+**`knowledge/DATABASES_FOUND.md`**
+- Inventory of all 5 databases identified
+- Detailed coverage of each source
+- Expansion options for future work
+
+#### 4. CSV Schema Design
+
+```csv
+id,title,text,level1_family,subtype,key_clues,numbers_present,integrality_implied,source_url,num_jobs,num_machines,num_sources,num_sinks
+```
+
+**Key Fields**:
+- `text`: Natural language problem description (input for classifier)
+- `level1_family`: Top-level category (scheduling, transportation)
+- `subtype`: Specific problem type (job_shop, flow_shop, single_stage_scheduling, transportation)
+- `key_clues`: Space-separated keywords (used for heuristic features)
+- Metadata: `num_jobs`, `num_machines`, etc. for analysis
+
+**Example Row** (Single-Stage):
+```csv
+sched/single_stage/syn001,Single-Stage Scheduling Synthetic 1,"Schedule 20 orders on 5 parallel machines. Each order requires exactly one operation. Choose which machine processes each order to minimize makespan. Processing times: Job1=45min, Job2=78min, Job3=23min. No machine can process multiple orders simultaneously.",scheduling,single_stage_scheduling,one_operation choose_machine parallel_machines OR_choice,yes,yes,synthetic_generated,20,5,,
+```
+
+### 🔍 Key Insights
+
+#### Why This Dataset Solves the Classification Problem
+
+**Current Issue**:
+- LLM classifier: 60% accuracy on problem type
+- Fails to distinguish job-shop vs single-stage (misses "OR" keyword)
+- Misses sequence indicators ("→", "then")
+
+**Dataset Solution**:
+1. **Large training set**: 153 instances >> 10 test cases (15x more data)
+2. **Balanced examples**: 82 job-shop + 25 single-stage (clear contrast)
+3. **Varied phrasing**: 5 templates prevent keyword overfitting
+4. **Real-world data**: 113 from OR-Library (actual research benchmarks)
+
+#### RAG Impact Assessment ❌
+
+**Finding**: RAG provides **NO VALUE** and causes **HARM**
+
+**Evidence**:
+- Classification: RAG not used (no impact)
+- Parameter extraction:
+  - WITHOUT RAG: 50% partial success (2/4)
+  - WITH RAG: 100% failure (4/4 timeouts)
+  - Root cause: RAG context (~500 tokens) + problem → prompts too long → 60s timeout
+
+**Conclusion**: Remove RAG from parameter extraction pipeline. Problem is LLM parsing logic, not knowledge gap.
+
+### 📊 Current Status
+
+**Datasets Available**:
+- ✅ `knowledge/ml_training_dataset.csv`: 153 instances ready for training
+- ✅ `knowledge/DSLIB/`: 203 project scheduling instances (future expansion)
+- 📋 OR-Library: 200+ instances available online (can download more)
+- 📋 Mathprog-ORlib: 200+ instances available online
+
+**Scripts**:
+- ✅ `scripts/build_training_dataset.py`: Download & parse OR-Library
+- ✅ `scripts/add_synthetic_instances.py`: Generate synthetic instances
+
+**Documentation**:
+- ✅ Complete README with usage examples
+- ✅ Database inventory with expansion options
+
+### 🚀 Next Steps (Tomorrow's Session)
+
+#### 1. **Verify Dataset Completeness** ⏱️ 1-2 hours
+
+**Tasks**:
+- [ ] Count all available instances from OR-Library (beyond jobshop1/flowshop1)
+- [ ] Check DSLIB Excel files: extract problem descriptions from 203 files
+- [ ] Count Mathprog-ORlib instances per category
+- [ ] Document what we have vs what's available
+
+**Expected**: Verify we got all easily-accessible instances from each source
+
+#### 2. **Merge All Datasets** ⏱️ 2-3 hours
+
+**Tasks**:
+- [ ] Create unified CSV: `knowledge/training_dataset_full.csv`
+- [ ] Add heuristic columns for ML training:
+  - `has_or_keyword`: boolean (indicates choice → single-stage)
+  - `has_sequence_keyword`: boolean (indicates "→" or "then" → multi-stage)
+  - `operation_count`: estimated ops per job (1 = single-stage, >1 = job-shop)
+  - `has_precedence`: boolean (precedence constraints mentioned)
+  - `word_count`: length of problem description
+  - `numeric_count`: count of numbers in text
+  - `mention_choose`: boolean ("choose which machine")
+  - `mention_visit`: boolean ("visit machines in order")
+- [ ] Verify all instances have required fields
+- [ ] Create train/test split (80/20)
+- [ ] Save metadata: instance counts per category, source distribution
+
+**Output**:
+- `knowledge/training_dataset_full.csv` (all instances + heuristics)
+- `knowledge/dataset_stats.json` (metadata)
+
+#### 3. **Train Initial ML Classifier** ⏱️ 2-3 hours
+
+**Tasks**:
+- [ ] Create `scripts/train_ml_classifier.py`
+- [ ] Feature engineering:
+  - TF-IDF vectorization (max_features=2000, ngram_range=(1,3))
+  - Heuristic features (8 columns added in step 2)
+  - Combine: sparse TF-IDF + dense heuristics
+- [ ] Train models:
+  - Random Forest (baseline)
+  - XGBoost (if time permits)
+  - Logistic Regression (fast baseline)
+- [ ] Cross-validation (5-fold)
+- [ ] Save best model: `models/problem_type_classifier.pkl`
+- [ ] Save vectorizer: `models/text_vectorizer.pkl`
+
+**Target Metrics**:
+- Accuracy: 85-90%+ (vs 60% LLM)
+- Inference: <50ms (vs 2-5s LLM)
+- F1-score: >0.85 for critical categories (single_stage_scheduling, job_shop)
+
+#### 4. **Evaluate & Compare** ⏱️ 1 hour
+
+**Tasks**:
+- [ ] Test ML classifier on `or_problem_repository.py` (10 solvable problems)
+- [ ] Compare ML vs LLM:
+  - Accuracy by problem type
+  - Inference time
+  - Confidence scores
+- [ ] Create comparison report: `knowledge/ML_vs_LLM_comparison.md`
+- [ ] Document misclassifications and root causes
+
+**Expected Outcomes**:
+- ML: 85-90% accuracy, <50ms latency
+- LLM: 60% accuracy, 2-5s latency
+- Identify: Which problems ML still struggles with → need more training data
+
+#### 5. **Update Diary** ⏱️ 15 minutes
+
+**Tasks**:
+- [ ] Document training results
+- [ ] Record model performance metrics
+- [ ] List next steps (hybrid classifier, integration)
+
+### 📁 Files Added Today
+
+**Scripts**:
+- `scripts/build_training_dataset.py` (365 lines)
+- `scripts/add_synthetic_instances.py` (230 lines)
+
+**Data**:
+- `knowledge/ml_training_dataset.csv` (154 rows: header + 153 instances)
+- `knowledge/orlib_raw/jobshop1.txt` (downloaded)
+- `knowledge/orlib_raw/flowshop1.txt` (downloaded)
+
+**Documentation**:
+- `knowledge/DATASET_README.md` (complete usage guide)
+- `knowledge/ML_TRAINING_SUMMARY.md` (project summary)
+- `knowledge/DATABASES_FOUND.md` (database inventory)
+
+**Existing**:
+- `knowledge/DSLIB/` (203 project scheduling instances - already present)
+- `knowledge/or_library_dataset.csv` (18 hand-crafted examples - kept for reference)
+
+### 🔧 Technical Notes
+
+**OR-Library File Format**:
+```
+10 10                    # num_jobs num_machines
+0 29 1 78 2 9 3 36 ...  # Job1: M0(29) M1(78) M2(9) M3(36) ...
+0 43 2 90 4 75 9 11 ... # Job2: M0(43) M2(90) M4(75) M9(11) ...
+```
+
+**Natural Language Conversion**:
+```
+"A job shop scheduling problem with 10 jobs and 10 machines.
+Each job must be processed through a sequence of machines in a
+specific order. Jobs have the following routes: Job1: M0(29min)
+→ M1(78min) → M2(9min); Job2: M0(43min) → M2(90min) → M4(75min);
+Job3: M1(91min) → M0(85min) → M3(39min). Each machine can process
+only one job at a time. Minimize makespan."
+```
+
+**Why Natural Language?**:
+- ML classifier will receive NL input from users
+- Training on same format as inference improves accuracy
+- Enables TF-IDF and n-gram features
+
+### 🎓 Lessons Learned
+
+1. **OR-Library is gold**: Public domain, widely cited, 200+ instances
+2. **DSLIB is massive**: 203 real-world project scheduling problems
+3. **Synthetic data is critical**: OR-Library lacks single-stage scheduling
+4. **RAG is not a silver bullet**: Actually made things worse (timeouts)
+5. **File naming matters**: OR-Library uses `.txt` extension (not bare names)
+
+---
+
+**Last Updated**: 2025-11-09 (end of session)
+**Next Session**:
+1. Verify dataset completeness (check all available instances)
+2. Merge datasets + add heuristic columns
+3. Train ML classifier
+4. Evaluate & compare ML vs LLM
 

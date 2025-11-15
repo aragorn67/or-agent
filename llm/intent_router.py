@@ -29,8 +29,17 @@ INTENT_SCHEMA = {
 class IntentRouter:
     """Routes user messages to appropriate handlers"""
 
-    def __init__(self, llm_client: LLMClient):
+    def __init__(self, llm_client):
         self.llm = llm_client
+        # Import ProblemClassifier for detailed classification
+        from .problem_classifier import ProblemClassifier
+
+        # If llm_client is EnhancedLLMClient, use its classification_client
+        # Otherwise use the client directly (backward compatibility)
+        if hasattr(llm_client, 'classification_client'):
+            self.problem_classifier = ProblemClassifier(llm_client.classification_client)
+        else:
+            self.problem_classifier = ProblemClassifier(llm_client)
 
     def detect_intent(self, message: str, conversation_context: Optional[Dict] = None) -> Dict[str, Any]:
         """
@@ -274,6 +283,113 @@ Classify the intent."""
             "type": "smalltalk",
             "response": "I'm an optimization assistant here to help you solve operations research problems. Feel free to describe an optimization challenge you're facing!"
         }
+
+    def classify(self, message: str, conversation_context: Optional[Dict] = None) -> Dict[str, Any]:
+        """
+        Unified classification: intent → category → expected_type in one call.
+
+        Returns:
+            {
+                "intent": "optimization|help|smalltalk|follow_up",
+                "intent_confidence": 0.0-1.0,
+                "category": "transportation|scheduling|...|none",
+                "category_confidence": 0.0-1.0,
+                "expected_type": "single_stage_scheduling|transportation|...|none",
+                "type_confidence": 0.0-1.0,
+                "rationale": "short why",
+                "evidence_ids": []  # Optional RAG evidence
+            }
+        """
+        # Step 1: Detect intent
+        intent_result = self.detect_intent(message, conversation_context)
+        intent = intent_result.get('intent', 'unknown')
+        intent_confidence = intent_result.get('confidence', 0.0)
+
+        # Step 2: If optimization, run detailed problem classification
+        if intent == 'optimization':
+            try:
+                # Use ProblemClassifier for detailed classification
+                classification, votes = self.problem_classifier.classify(message, n=3)
+
+                problem_type = classification.get('problem_type', 'custom_review')
+                type_confidence = classification.get('confidence', 0.0)
+
+                # Map problem_type to category
+                category = self._map_type_to_category(problem_type)
+
+                return {
+                    "intent": intent,
+                    "intent_confidence": intent_confidence,
+                    "category": category,
+                    "category_confidence": type_confidence,  # Use same confidence
+                    "expected_type": problem_type,
+                    "type_confidence": type_confidence,
+                    "rationale": classification.get('why_short', 'Optimization problem detected'),
+                    "evidence_ids": []  # Can be populated from RAG later
+                }
+            except Exception as e:
+                # Fallback if classifier fails
+                return {
+                    "intent": intent,
+                    "intent_confidence": intent_confidence,
+                    "category": "none",
+                    "category_confidence": 0.0,
+                    "expected_type": "none",
+                    "type_confidence": 0.0,
+                    "rationale": f"Classification failed: {e}",
+                    "evidence_ids": []
+                }
+        else:
+            # Non-optimization intents: set category and type to "none"
+            return {
+                "intent": intent,
+                "intent_confidence": intent_confidence,
+                "category": "none",
+                "category_confidence": 1.0,
+                "expected_type": "none",
+                "type_confidence": 1.0,
+                "rationale": intent_result.get('reasoning', 'Non-optimization intent'),
+                "evidence_ids": []
+            }
+
+    def _map_type_to_category(self, problem_type: str) -> str:
+        """Map specific problem_type to high-level category."""
+        mapping = {
+            # Transportation
+            "transportation": "transportation",
+
+            # Scheduling
+            "single_stage_scheduling": "scheduling",
+            "job_shop": "scheduling",
+            "flow_shop": "scheduling",
+            "shift_rostering": "scheduling",
+            "project_scheduling": "scheduling",
+            "single_machine_tardiness": "scheduling",
+
+            # Assignment
+            "assignment": "assignment",
+
+            # Knapsack
+            "knapsack": "knapsack",
+            "portfolio": "knapsack",
+
+            # Network Flow
+            "shortest_path": "network_flow",
+            "max_flow": "network_flow",
+
+            # Facility Location
+            "facility_location": "facility_location",
+
+            # Set Cover
+            "set_cover": "set_cover",
+
+            # Production Planning
+            "lot_sizing": "production_planning",
+
+            # Custom/Unknown
+            "custom_review": "custom"
+        }
+        return mapping.get(problem_type, "custom")
 
     def handle_help_request(self, message: str) -> Dict[str, Any]:
         """Handle help requests without heavy LLM use"""

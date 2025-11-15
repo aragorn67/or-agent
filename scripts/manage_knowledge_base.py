@@ -33,8 +33,8 @@ def build_index(kb: KnowledgeBase):
     # Load papers
     num_docs = kb.load_papers()
     if num_docs == 0:
-        print("\n❌ No PDF files found in knowledge/papers/")
-        print("\n📁 Please add PDF files to the knowledge/papers/ directory")
+        print("\n❌ No PDF files found in ML_approaches/RAG/papers/")
+        print("\n📁 Please add PDF files to the ML_approaches/RAG/papers/ directory")
         print("   Then run this script again.")
         return False
 
@@ -48,7 +48,7 @@ def build_index(kb: KnowledgeBase):
 
     if success:
         print("\n✅ Index built successfully!")
-        print(f"   Saved to: knowledge/vectorstore/")
+        print(f"   Saved to: ML_approaches/RAG/vectorstore/")
         return True
     else:
         print("\n❌ Failed to build index")

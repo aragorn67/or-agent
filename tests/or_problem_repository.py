@@ -40,7 +40,8 @@ __all__ = [
     'get_problems_by_category',
     'get_solvable_problems',
     'get_categories',
-    'list_problems'
+    'list_problems',
+    'get_solver_id'  # Helper to map problem types to solver IDs
 ]
 
 # ============================================================================
@@ -155,6 +156,98 @@ Minimize the total transportation cost while meeting all demand.""",
     },
 
     {
+    "id": "transport/food_retail/001",
+    "name": "fresh_food_distribution",
+    "category": ProblemCategory.TRANSPORTATION.value,
+    "expected_type": ProblemType.TRANSPORTATION.value,
+    "text": """A national grocery chain distributes perishable goods from 3 regional warehouses 
+(London, Manchester, Bristol) to 5 city stores. Each warehouse has daily capacity (tons) and 
+each store daily demand (tons). Costs (£/ton) are known. 
+Find a transport plan minimizing total cost while meeting all store demands 
+without exceeding warehouse capacity.""",
+    "metadata": {
+        "units": {"cost": "GBP/ton", "capacity": "tons/day"},
+        "scale": {"sources": 3, "sinks": 5},
+        "balanced": True,
+        "industry": "retail_food",
+        "tags": ["perishable", "cost_min", "balanced"]
+    },
+    "expected_schema": {
+        "sets": ["I_warehouses", "J_stores"],
+        "params": ["capacity[i]", "demand[j]", "cost[i,j]"],
+        "vars": ["x[i,j] >= 0"],
+        "objective": "min sum_{i,j} cost[i,j]*x[i,j]",
+        "constraints": [
+            "sum_j x[i,j] <= capacity[i]",
+            "sum_i x[i,j] = demand[j]"
+        ]
+    },
+    "solvable": True,
+    "notes": "Realistic perishable distribution network."
+},
+
+{
+    "id": "transport/steel_construction/001",
+    "name": "steel_supply_construction",
+    "category": ProblemCategory.TRANSPORTATION.value,
+    "expected_type": ProblemType.TRANSPORTATION.value,
+    "text": """Two steel mills (Sheffield, Glasgow) supply five major construction projects. 
+Each mill has weekly output limits and each project requires specified steel tonnage. 
+Transport costs (£/ton) depend on distance. 
+Decide shipping quantities to minimize total cost while meeting all demands.""",
+    "metadata": {
+        "units": {"cost": "GBP/ton", "capacity": "tons/week"},
+        "scale": {"sources": 2, "sinks": 5},
+        "balanced": False,
+        "industry": "construction_materials",
+        "tags": ["heavy_industry", "unbalanced", "cost_min"]
+    },
+    "expected_schema": {
+        "sets": ["I_mills", "J_projects"],
+        "params": ["capacity[i]", "demand[j]", "cost[i,j]"],
+        "vars": ["x[i,j] >= 0"],
+        "objective": "min sum_{i,j} cost[i,j]*x[i,j]",
+        "constraints": [
+            "sum_j x[i,j] <= capacity[i]",
+            "sum_i x[i,j] >= demand[j]"
+        ]
+    },
+    "solvable": True,
+    "notes": "Steel logistics example; good for unbalanced transport detection."
+},
+
+{
+    "id": "transport/pharma_coldchain/001",
+    "name": "vaccine_cold_chain",
+    "category": ProblemCategory.TRANSPORTATION.value,
+    "expected_type": ProblemType.MIN_COST_FLOW.value,
+    "text": """A pharmaceutical company distributes temperature-sensitive vaccines from one national depot 
+to 4 hospital clusters through 2 intermediate cold hubs. 
+Hub capacities and transport costs (€/vial) are known. 
+Decide shipment quantities along each route to minimize cost 
+while respecting hub capacities and fulfilling hospital demand.""",
+    "metadata": {
+        "units": {"cost": "EUR/vial", "capacity": "vials/day"},
+        "scale": {"nodes": 7, "arcs": 10},
+        "industry": "pharmaceutical",
+        "tags": ["cold_chain", "multi_stage_transport", "min_cost_flow"]
+    },
+    "expected_schema": {
+        "sets": ["N_nodes", "A_arcs"],
+        "params": ["capacity[a]", "cost[a]", "supply[n]", "demand[n]"],
+        "vars": ["flow[a] >= 0"],
+        "objective": "min sum_a cost[a]*flow[a]",
+        "constraints": [
+            "flow_conservation[n] for all n",
+            "flow[a] <= capacity[a] for all a"
+        ]
+    },
+    "solvable": True,
+    "notes": "Realistic multi-stage min-cost flow in pharma cold-chain logistics."
+}, 
+
+
+    {
         "id": "transport/us_mfg/001",
         "name": "us_manufacturing_distribution",
         "category": ProblemCategory.TRANSPORTATION.value,
@@ -263,6 +356,96 @@ Minimize the total makespan while meeting all due dates.""",
         "solvable": True,
         "notes": "CLARIFIED: Each order goes to ONE reactor (single operation). 'OR' makes it clear."
     },
+
+    {
+    "id": "sched/ecommerce/001",
+    "name": "warehouse_order_picking",
+    "category": ProblemCategory.SCHEDULING.value,
+    "expected_type": ProblemType.SINGLE_STAGE_SCHEDULING.value,
+    "text": """An e-commerce warehouse operates one picking line that can process one batch at a time. 
+10 orders must be processed with known picking times and shipping deadlines. 
+Each order's lateness incurs penalty cost (£/min). 
+Decide the order sequence to minimize total weighted tardiness.""",
+    "metadata": {
+        "units": {"time": "minutes"},
+        "scale": {"jobs": 10, "machines": 1},
+        "industry": "ecommerce_logistics",
+        "characteristics": ["single_machine", "weighted_tardiness"],
+        "tags": ["1||sum_wTj", "sequencing", "penalty_cost"]
+    },
+    "expected_schema": {
+        "sets": ["J_orders"],
+        "params": ["proc_time[j]", "due_date[j]", "weight[j]"],
+        "vars": ["sequence[j]", "completion[j]", "tardiness[j]"],
+        "objective": "min sum_j weight[j]*tardiness[j]",
+        "constraints": [
+            "completion[j] = cumulative(proc_time[k]) up to sequence[j]",
+            "tardiness[j] >= completion[j] - due_date[j]",
+            "all_different(sequence)"
+        ]
+    },
+    "solvable": True,
+    "notes": "Weighted tardiness scheduling from online-retail fulfilment."
+}, 
+
+{
+    "id": "sched/semiconductor/001",
+    "name": "wafer_processing_single_stage",
+    "category": ProblemCategory.SCHEDULING.value,
+    "expected_type": ProblemType.SINGLE_STAGE_SCHEDULING.value,
+    "text": """A semiconductor fab schedules 6 wafer lots on a single photolithography machine. 
+Each lot requires a setup time dependent on the previous lot's photoresist type. 
+The goal is to minimize total completion time (makespan).""",
+    "metadata": {
+        "units": {"time": "hours"},
+        "scale": {"jobs": 6, "machines": 1},
+        "industry": "semiconductor",
+        "characteristics": ["single_machine", "sequence_dependent_setup"],
+        "tags": ["makespan_min", "setup_time", "manufacturing"]
+    },
+    "expected_schema": {
+        "sets": ["J_lots"],
+        "params": ["proc_time[j]", "setup[j1,j2]"],
+        "vars": ["sequence[j]", "completion[j]"],
+        "objective": "min max_j completion[j]",
+        "constraints": [
+            "completion[j] >= completion[prev(j)] + proc_time[j] + setup[prev(j), j]",
+            "all_different(sequence)"
+        ]
+    },
+    "solvable": True,
+    "notes": "Real industrial scheduling with setup-time dependency."
+},
+
+{
+    "id": "sched/pharma_packaging/001",
+    "name": "pharmaceutical_packaging_line",
+    "category": ProblemCategory.SCHEDULING.value,
+    "expected_type": ProblemType.SINGLE_STAGE_SCHEDULING.value,
+    "text": """A drug manufacturer packages 8 different medicines on one automated line. 
+Each product requires a fixed processing time and must finish before its delivery due time. 
+The objective is to minimize the maximum lateness (Lmax).""",
+    "metadata": {
+        "units": {"time": "minutes"},
+        "scale": {"jobs": 8, "machines": 1},
+        "industry": "pharmaceutical",
+        "characteristics": ["single_machine", "lateness_min"],
+        "tags": ["1||Lmax", "pharma_packaging", "due_date"]
+    },
+    "expected_schema": {
+        "sets": ["J_products"],
+        "params": ["proc_time[j]", "due_date[j]"],
+        "vars": ["sequence[j]", "completion[j]", "lateness[j]"],
+        "objective": "min max_j lateness[j]",
+        "constraints": [
+            "lateness[j] = completion[j] - due_date[j]",
+            "all_different(sequence)"
+        ]
+    },
+    "solvable": True,
+    "notes": "Classic single-machine Lmax problem in pharma packaging operations."
+},
+
 
     {
         "id": "sched/pcb/001",
@@ -935,8 +1118,12 @@ Minimize total flow cost (cost=1 per unit per arc) subject to shared arc capacit
 # ============================================================================
 
 def get_all_problems() -> List[Dict]:
-    """Return all problems from all categories."""
-    return (
+    """
+    Return all problems from all categories.
+
+    Automatically adds 'solver_id' field to each problem based on expected_type.
+    """
+    all_problems = (
         TRANSPORTATION_PROBLEMS +
         SCHEDULING_PROBLEMS +
         ASSIGNMENT_PROBLEMS +
@@ -949,6 +1136,13 @@ def get_all_problems() -> List[Dict]:
         BIN_PACKING_PROBLEMS +
         MULTICOMMODITY_FLOW_PROBLEMS
     )
+
+    # Automatically add solver_id to each problem
+    for problem in all_problems:
+        if 'solver_id' not in problem:
+            problem['solver_id'] = get_solver_id(problem)
+
+    return all_problems
 
 def get_problems_by_category(category: str) -> List[Dict]:
     """Get problems of a specific category."""
@@ -1151,6 +1345,62 @@ Examples:
 
     else:
         parser.print_help()
+
+# ============================================================================
+# SOLVER FAMILY MAPPING
+# ============================================================================
+
+def get_solver_id(problem: Dict) -> str:
+    """
+    Map fine-grained expected_type to a solver_id that matches
+    what the current system can actually handle.
+
+    Args:
+        problem: Problem dict with expected_type field
+
+    Returns:
+        solver_id: "transport_basic_bipartite", "single_stage_ipm_scheduling", or "none"
+
+    Examples:
+        - 'transportation' -> 'transport_basic_bipartite' (if bipartite)
+        - 'min_cost_flow' -> 'none' (not yet supported, needs network solver)
+        - 'single_stage_scheduling' -> 'single_stage_ipm_scheduling'
+        - 'job_shop' -> 'none' (not yet implemented)
+    """
+    expected_type = problem.get("expected_type", "")
+    metadata = problem.get("metadata", {})
+
+    # Transportation family: only basic bipartite plant→market
+    if expected_type == ProblemType.TRANSPORTATION.value:
+        # Check if it's truly bipartite (no transshipment)
+        graph_sig = metadata.get("graph_signature", "")
+        if "bipartite" in graph_sig or graph_sig == "":
+            return "transport_basic_bipartite"
+        else:
+            return "none"  # Has transshipment or other complexity
+
+    # Min-cost flow: requires general network solver (not yet implemented)
+    if expected_type == ProblemType.MIN_COST_FLOW.value:
+        return "none"
+
+    # Single-stage scheduling family
+    if expected_type in [
+        ProblemType.SINGLE_STAGE_SCHEDULING.value,
+        ProblemType.SINGLE_MACHINE_TARDINESS.value
+    ]:
+        return "single_stage_ipm_scheduling"
+
+    # Job shop, flow shop: not yet implemented
+    if expected_type in [
+        ProblemType.JOB_SHOP.value,
+        ProblemType.FLOW_SHOP.value,
+        ProblemType.OPEN_SHOP.value
+    ]:
+        return "none"
+
+    # Everything else: not supported yet
+    return "none"
+
 
 if __name__ == "__main__":
     main()

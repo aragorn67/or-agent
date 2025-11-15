@@ -15,7 +15,7 @@ EXPECTED OUTPUT:
     ✓ Summary showing all requests completed
 
 RUN: python tests/test_llm_analysis_understanding.py
-REQUIRES: Ollama (localhost:11434), qwen2:7b model
+REQUIRES: Ollama (localhost:11434), deepseek-r1:latest model
 """
 
 import sys
@@ -23,10 +23,11 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from llm.enhanced_client import EnhancedLLMClient
+from config import Config
 from agent.core import OptimizationAgent
 from llm.intent_router import IntentRouter
 from llm.follow_up_handler import FollowUpHandler
-from or_problem_repository import get_problem_by_name
+from tests.or_problem_repository import get_problem_by_name
 import matplotlib.pyplot as plt
 import numpy as np
 from datetime import datetime
@@ -162,7 +163,7 @@ def main():
     print_section("STEP 2: Initialize Agent")
 
     try:
-        llm_client = EnhancedLLMClient(host="http://localhost:11434", model="qwen2:7b")
+        llm_client = EnhancedLLMClient(host=Config.OLLAMA_HOST, model=Config.OLLAMA_MODEL)
         agent = OptimizationAgent(llm_client)
         intent_router = IntentRouter(llm_client)
         follow_up_handler = FollowUpHandler(llm_client)
