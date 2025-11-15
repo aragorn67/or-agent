@@ -19,8 +19,11 @@ EXPECTED OUTPUT:
 
 RUN: pytest tests/test_llm_refactoring.py -v
 REQUIRES: Mock LLM (uses unittest.mock, no Ollama needed)
-STATUS: Import error (ModuleNotFoundError: 'llm') - needs sys.path fix
 """
+
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
 import json
@@ -371,7 +374,7 @@ class TestLLMConfig:
     def test_default_config(self):
         """Test default configuration values"""
         cfg = LLMConfig()
-        assert cfg.model_config.model == "qwen2:7b"
+        assert cfg.model_config.model == "deepseek-r1:latest"
         assert cfg.model_config.temperature == 0.0
         assert cfg.behavior.concise_mode is True
 

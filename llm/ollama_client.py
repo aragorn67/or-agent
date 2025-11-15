@@ -7,7 +7,7 @@ from .client import LLMClient
 class OllamaClient(LLMClient):
     """Ollama LLM client implementation"""
 
-    def __init__(self, host: str = "http://localhost:11434", model: str = "qwen2:7b"):
+    def __init__(self, host: str = "http://localhost:11434", model: str = "deepseek-r1:latest"):
         self.host = host.rstrip('/')
         self.model = model
 

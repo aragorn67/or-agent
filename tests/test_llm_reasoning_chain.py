@@ -21,7 +21,7 @@ EXPECTED OUTPUT:
     ✓ Final summary showing all prompts processed
 
 RUN: python tests/test_llm_reasoning_chain.py
-REQUIRES: Ollama (localhost:11434), qwen2:7b model
+REQUIRES: Ollama (localhost:11434), deepseek-r1:latest model
 """
 
 import sys
@@ -33,7 +33,8 @@ from llm.knowledge_base import KnowledgeBase
 from agent.core import OptimizationAgent
 from llm.intent_router import IntentRouter
 from llm.follow_up_handler import FollowUpHandler
-from or_problem_repository import get_problem_by_name
+from tests.or_problem_repository import get_problem_by_name
+from config import Config
 import matplotlib.pyplot as plt
 import numpy as np
 from datetime import datetime
@@ -239,7 +240,7 @@ Let's begin...
             print("⚠ RAG knowledge base not built (run: python scripts/manage_knowledge_base.py build)")
             kb = None
 
-        llm_client = EnhancedLLMClient(host="http://localhost:11434", model="qwen2:7b", knowledge_base=kb)
+        llm_client = EnhancedLLMClient(host=Config.OLLAMA_HOST, model=Config.OLLAMA_MODEL, knowledge_base=kb)
         agent = OptimizationAgent(llm_client)
         intent_router = IntentRouter(llm_client)
         follow_up_handler = FollowUpHandler(llm_client)

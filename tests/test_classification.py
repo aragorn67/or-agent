@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-TEST: Classification Evaluation
+TEST: Classification Evaluation with RAG Insight
 
 PURPOSE: Test classifier accuracy against OR problem repository
-TESTS: Intent classification, confidence scoring, category filtering
+TESTS: Intent classification, confidence scoring, RAG retrieval demonstration
 PROBLEMS: or_problem_repository.py (all or filtered by category/solvable)
 
 EXPECTED OUTPUT:
@@ -11,84 +11,150 @@ EXPECTED OUTPUT:
     ✓ Classification accuracy: 100.0%
     ✓ All problems correctly identified as optimization
     ✓ Confidence scores: 90%, 90%, 90%, 85% (typical)
-    ✓ No errors reported
-    ✓ Summary with total/passed/accuracy
+    ✓ With --show-rag: Displays RAG retrieval for each problem
+      - Shows query sent to knowledge base
+      - Displays retrieved chunks from textbooks
+      - Shows source documents (which PDF)
+      - Demonstrates RAG thinking process
 
-RUN: python tests/test_classification.py --solvable
-REQUIRES: Ollama (localhost:11434), qwen2:7b model
+RUN: python tests/test_classification.py --solvable --show-rag
+REQUIRES: Ollama (localhost:11434), deepseek-r1:latest model, RAG knowledge base loaded
 USAGE:
-    python test_classification.py              # Test all problems
-    python test_classification.py --solvable   # Test only solvable problems
-    python test_classification.py --category transportation  # Test specific category
+    python test_classification.py                    # Test all problems
+    python test_classification.py --solvable         # Test only solvable problems
+    python test_classification.py --solvable --show-rag  # Show RAG retrieval details
+    python test_classification.py --solvable --compare-rag  # Compare with/without RAG
+    python test_classification.py --category transportation --show-rag
 """
 
 import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from or_problem_repository import (
+from tests.or_problem_repository import (
     get_all_problems,
     get_solvable_problems,
     get_problems_by_category,
     ProblemCategory
 )
 from llm.enhanced_client import EnhancedLLMClient
+from config import Config
 from llm.intent_router import IntentRouter
+from llm.knowledge_base import KnowledgeBase
 import argparse
+import pickle
+from pathlib import Path
 
 
-def test_classification(problems, llm_client):
+def test_classification(problems, llm_client, show_rag=False):
     """
     Test classifier on a set of problems.
 
+    Args:
+        problems: List of problems to test
+        llm_client: EnhancedLLMClient instance
+        show_rag: If True, show RAG retrieval details
+
     Returns:
-        tuple: (total, correct, errors)
+        dict: Results with total, correct_intent, correct_category, correct_type, all_three_correct, errors
     """
     intent_router = IntentRouter(llm_client)
+    kb = llm_client.kb  # Access knowledge base from client
 
     results = {
         'total': 0,
-        'correct': 0,
-        'errors': []
+        'correct_intent': 0,
+        'correct_category': 0,
+        'correct_type': 0,
+        'all_three_correct': 0,
+        'errors': [],
+        'rag_used': 0
     }
 
     print(f"\n{'='*80}")
-    print(f"  TESTING CLASSIFICATION")
+    print(f"  TESTING INTENT → CATEGORY → TYPE")
     print(f"{'='*80}\n")
+
+    if kb:
+        print(f"📚 RAG Knowledge Base: LOADED")
+        print(f"   Vector store: knowledge/vectorstore/")
+        print(f"   Status: Active\n")
+    else:
+        print(f"⚠️  RAG Knowledge Base: NOT LOADED\n")
 
     for problem in problems:
         results['total'] += 1
         problem_name = problem['name']
         problem_id = problem['id']
+        expected_category = problem['category']
         expected_type = problem['expected_type']
         problem_text = problem['text']
 
+        print(f"\n{'─'*80}")
         print(f"Testing: {problem_id}")
-        print(f"  Expected type: {expected_type}")
+        print(f"  Problem: {problem_name}")
+        print(f"  Expected: intent=optimization, category={expected_category}, type={expected_type}")
 
         try:
-            # Classify the problem using intent router
+            # Show RAG retrieval if requested
+            if show_rag and kb:
+                print(f"\n  🔍 RAG RETRIEVAL:")
+                # Query knowledge base for relevant context
+                query = f"{expected_type} problem canonical definition objective variables constraints"
+                rag_results = kb.search(query, k=2)
+
+                if rag_results:
+                    results['rag_used'] += 1
+                    print(f"     Query: '{query}'")
+                    print(f"     Found: {len(rag_results)} relevant chunks")
+                    for i, result in enumerate(rag_results, 1):
+                        # Show snippet of retrieved text
+                        content = result.get('content', '')
+                        snippet = content[:160].replace('\n', ' ')
+                        print(f"     [{i}] {snippet}...")
+                        metadata = result.get('metadata', {})
+                        if metadata:
+                            source = metadata.get('source', 'unknown')
+                            page = metadata.get('page', '?')
+                            print(f"         ← {source} p.{page}")
+                else:
+                    print(f"     (no chunks found)")
+
+            # Classify the problem using unified classify() method
             conversation_context = {'last_solution': None, 'messages': []}
-            intent_result = intent_router.detect_intent(problem_text, conversation_context)
+            cls = intent_router.classify(problem_text, conversation_context)
 
-            detected_intent = intent_result.get('intent', 'unknown')
-            confidence = intent_result.get('confidence', 0.0)
+            got_intent = cls.get('intent', 'unknown')
+            got_category = cls.get('category', 'none')
+            got_type = cls.get('expected_type', 'none')
 
-            print(f"  Detected intent: {detected_intent} (confidence: {confidence:.1%})")
+            intent_conf = cls.get('intent_confidence', 0.0)
+            category_conf = cls.get('category_confidence', 0.0)
+            type_conf = cls.get('type_confidence', 0.0)
 
-            # For now, we check if it's classified as 'optimization'
-            # In future, we can extract more specific problem type from metadata
-            if detected_intent == 'optimization':
-                print(f"  ✓ Correctly identified as optimization problem")
-                results['correct'] += 1
-            else:
-                print(f"  ✗ FAILED: Expected optimization, got {detected_intent}")
+            # Check each dimension
+            ok_intent = (got_intent == 'optimization')
+            ok_category = (got_category == expected_category)
+            ok_type = (got_type == expected_type)
+
+            print(f"\n  🤖 RESULT:")
+            print(f"     intent={got_intent} ({intent_conf:.0%}) {'✓' if ok_intent else '✗'}")
+            print(f"     category={got_category} ({category_conf:.0%}) {'✓' if ok_category else '✗'}")
+            print(f"     type={got_type} ({type_conf:.0%}) {'✓' if ok_type else '✗'}")
+
+            # Update counters
+            results['correct_intent'] += int(ok_intent)
+            results['correct_category'] += int(ok_category)
+            results['correct_type'] += int(ok_type)
+            results['all_three_correct'] += int(ok_intent and ok_category and ok_type)
+
+            # Record errors
+            if not (ok_intent and ok_category and ok_type):
                 results['errors'].append({
                     'id': problem_id,
                     'name': problem_name,
-                    'expected': expected_type,
-                    'actual': detected_intent,
-                    'confidence': confidence
+                    'exp': {'intent': 'optimization', 'category': expected_category, 'type': expected_type},
+                    'got': {'intent': got_intent, 'category': got_category, 'type': got_type}
                 })
 
         except Exception as e:
@@ -96,8 +162,6 @@ def test_classification(problems, llm_client):
             results['errors'].append({
                 'id': problem_id,
                 'name': problem_name,
-                'expected': expected_type,
-                'actual': 'ERROR',
                 'error': str(e)
             })
 
@@ -170,21 +234,168 @@ def test_schema_extraction(problems, llm_client):
     return results
 
 
+def test_classification_ml(problems):
+    """
+    Test ML classifier on problems.
+
+    Args:
+        problems: List of problems to test
+
+    Returns:
+        dict: Results with total, correct_type, errors
+    """
+    # Load ML classifier
+    model_path = Path("models/problem_classifier.pkl")
+    vectorizer_path = Path("models/problem_vectorizer.pkl")
+
+    if not model_path.exists() or not vectorizer_path.exists():
+        print("❌ ML classifier not found. Run scripts/train_classifier.py first.")
+        return None
+
+    with open(model_path, 'rb') as f:
+        classifier = pickle.load(f)
+
+    with open(vectorizer_path, 'rb') as f:
+        vectorizer = pickle.load(f)
+
+    print(f"✓ Loaded ML classifier with {len(vectorizer.get_feature_names_out())} features\n")
+
+    # Type mapping from repository to classifier
+    type_mapping = {
+        'single_stage_scheduling': 'single_stage_scheduling',
+        'job_shop': 'job_shop',
+        'flow_shop': 'flow_shop',
+        'open_shop': 'scheduling',
+        'shift_rostering': 'scheduling',
+        'project_scheduling': 'scheduling',
+        'single_machine_tardiness': 'scheduling',
+        'transportation': 'transportation',
+        'min_cost_flow': 'transportation',
+        'zero_one_knapsack': 'knapsack',
+        'bounded_knapsack': 'knapsack',
+        'knapsack': 'knapsack',
+        'assignment': 'assignment',
+        'bipartite_matching': 'assignment',
+        'uncapacitated_facility_location': 'facility_location',
+        'capacitated_facility_location': 'facility_location',
+        'facility_location': 'facility_location',
+        'max_flow': 'network_flow',
+        'shortest_path': 'network_flow',
+        'network_flow': 'network_flow',
+        'production_planning': 'production_planning',
+        'blending': 'blending',
+        'bin_packing': 'bin_packing',
+        'set_cover': 'selection_problem',
+        'cvrp': 'transportation',
+        'vrptw': 'transportation',
+    }
+
+    results = {
+        'total': 0,
+        'correct_intent': 0,  # Always optimization for ML classifier
+        'correct_category': 0,  # ML doesn't predict category
+        'correct_type': 0,
+        'all_three_correct': 0,
+        'errors': []
+    }
+
+    print(f"\n{'='*80}")
+    print(f"  TESTING ML CLASSIFIER")
+    print(f"{'='*80}\n")
+
+    for problem in problems:
+        results['total'] += 1
+        problem_name = problem['name']
+        problem_id = problem['id']
+        expected_category = problem['category']
+        expected_type = problem['expected_type']
+        problem_text = problem['text']
+
+        # Map expected type
+        expected_mapped = type_mapping.get(expected_type, expected_type)
+
+        print(f"\n{'─'*80}")
+        print(f"Testing: {problem_id}")
+        print(f"  Problem: {problem_name}")
+        print(f"  Expected type: {expected_mapped}")
+
+        try:
+            # Predict using ML
+            X = vectorizer.transform([problem_text])
+            predicted = classifier.predict(X)[0]
+            probabilities = classifier.predict_proba(X)[0]
+            confidence = max(probabilities) * 100
+
+            # Get top 3 predictions
+            top_indices = probabilities.argsort()[-3:][::-1]
+            top_predictions = [
+                (classifier.classes_[i], probabilities[i] * 100)
+                for i in top_indices
+            ]
+
+            # Check correctness
+            ok_type = (predicted == expected_mapped)
+
+            print(f"\n  🤖 ML RESULT:")
+            print(f"     predicted={predicted} ({confidence:.0f}%) {'✓' if ok_type else '✗'}")
+            print(f"     Top 3: {', '.join([f'{p} ({c:.1f}%)' for p, c in top_predictions])}")
+
+            # Update counters (ML always predicts intent=optimization, doesn't predict category)
+            results['correct_intent'] += 1  # Assume all are optimization
+            results['correct_type'] += int(ok_type)
+
+            # Record errors
+            if not ok_type:
+                results['errors'].append({
+                    'id': problem_id,
+                    'name': problem_name,
+                    'exp': {'type': expected_mapped},
+                    'got': {'type': predicted},
+                    'confidence': confidence,
+                    'top_3': top_predictions
+                })
+
+        except Exception as e:
+            print(f"  ✗ ERROR: {str(e)}")
+            results['errors'].append({
+                'id': problem_id,
+                'name': problem_name,
+                'error': str(e)
+            })
+
+        print()
+
+    return results
+
+
 def print_summary(classification_results, schema_results=None):
     """Print test summary."""
+    t = max(classification_results['total'], 1)  # Avoid division by zero
+
     print(f"\n{'='*80}")
     print(f"  TEST SUMMARY")
     print(f"{'='*80}\n")
 
-    print("Classification Test:")
-    print(f"  Total problems: {classification_results['total']}")
-    print(f"  Correctly classified: {classification_results['correct']}")
-    print(f"  Accuracy: {classification_results['correct']/classification_results['total']*100:.1f}%")
+    print("Classification:")
+    print(f"  Total: {t}")
+    print(f"  Intent accuracy:    {classification_results['correct_intent']}/{t} = {classification_results['correct_intent']/t*100:.1f}%")
+    print(f"  Category accuracy:  {classification_results['correct_category']}/{t} = {classification_results['correct_category']/t*100:.1f}%")
+    print(f"  Type accuracy:      {classification_results['correct_type']}/{t} = {classification_results['correct_type']/t*100:.1f}%")
+    print(f"  All-three accuracy: {classification_results['all_three_correct']}/{t} = {classification_results['all_three_correct']/t*100:.1f}%")
+
+    # Show RAG usage statistics
+    if classification_results.get('rag_used', 0):
+        print(f"\n  📚 RAG retrievals: {classification_results['rag_used']}/{t}")
 
     if classification_results['errors']:
-        print(f"\n  Errors ({len(classification_results['errors'])}):")
-        for error in classification_results['errors']:
-            print(f"    - {error['id']}: expected {error['expected']}, got {error['actual']}")
+        print(f"\n  Misclassifications ({len(classification_results['errors'])}):")
+        for e in classification_results['errors']:
+            if 'error' in e:
+                print(f"    - {e['id']}: ERROR {e['error']}")
+            else:
+                print(f"    - {e['id']}:")
+                print(f"        exp: {e['exp']}")
+                print(f"        got: {e['got']}")
 
     if schema_results:
         print(f"\nSchema Extraction Test:")
@@ -212,10 +423,16 @@ def main():
                        help='Test only problems in this category')
     parser.add_argument('--schema', action='store_true',
                        help='Also test schema extraction')
+    parser.add_argument('--show-rag', action='store_true',
+                       help='Show RAG retrieval details for each problem')
+    parser.add_argument('--compare-rag', action='store_true',
+                       help='Compare classification with and without RAG')
     parser.add_argument('--host', type=str, default='http://localhost:11434',
                        help='Ollama host (default: http://localhost:11434)')
-    parser.add_argument('--model', type=str, default='qwen2:7b',
-                       help='LLM model (default: qwen2:7b)')
+    parser.add_argument('--model', type=str, default='deepseek-r1:latest',
+                       help='LLM model (default: deepseek-r1:latest)')
+    parser.add_argument('--use-ml', action='store_true',
+                       help='Use ML classifier instead of LLM')
 
     args = parser.parse_args()
 
@@ -236,16 +453,111 @@ def main():
 
     print(f"Testing {len(problems)} problems...")
 
+    # Use ML classifier if requested
+    if args.use_ml:
+        print("\n🤖 Using ML Classifier\n")
+        classification_results = test_classification_ml(problems)
+        if classification_results is None:
+            return 1
+        print_summary(classification_results, None)
+        return 0 if not classification_results['errors'] else 1
+
+    # Check if comparison mode is requested
+    if args.compare_rag:
+        print("\n" + "="*80)
+        print("  COMPARISON MODE: WITH vs WITHOUT RAG")
+        print("="*80 + "\n")
+
+        # Run WITHOUT RAG first
+        print("━━━ PHASE 1: Classification WITHOUT RAG ━━━\n")
+        try:
+            llm_client_no_rag = EnhancedLLMClient(host=args.host, model=args.model, knowledge_base=None)
+            print(f"✓ Connected (NO RAG)\n")
+        except Exception as e:
+            print(f"✗ Failed to connect to LLM: {e}")
+            return 1
+
+        results_without_rag = test_classification(problems, llm_client_no_rag, show_rag=False)
+
+        # Run WITH RAG
+        print("\n" + "━"*80)
+        print("━━━ PHASE 2: Classification WITH RAG ━━━\n")
+        try:
+            print("Loading RAG knowledge base...")
+            kb = KnowledgeBase()
+            print(f"✓ RAG knowledge base loaded\n")
+            llm_client_with_rag = EnhancedLLMClient(host=args.host, model=args.model, knowledge_base=kb)
+        except Exception as e:
+            print(f"⚠️  Could not load knowledge base: {e}")
+            return 1
+
+        results_with_rag = test_classification(problems, llm_client_with_rag, show_rag=args.show_rag)
+
+        # Print comparison summary
+        print("\n" + "="*80)
+        print("  COMPARISON SUMMARY")
+        print("="*80 + "\n")
+
+        print(f"WITHOUT RAG:")
+        print(f"  Accuracy: {results_without_rag['correct']}/{results_without_rag['total']} = {results_without_rag['correct']/results_without_rag['total']*100:.1f}%")
+        print(f"  Errors: {len(results_without_rag['errors'])}")
+
+        print(f"\nWITH RAG:")
+        print(f"  Accuracy: {results_with_rag['correct']}/{results_with_rag['total']} = {results_with_rag['correct']/results_with_rag['total']*100:.1f}%")
+        print(f"  Errors: {len(results_with_rag['errors'])}")
+        print(f"  RAG Queries: {results_with_rag.get('rag_used', 0)}")
+
+        # Show improvement
+        diff = results_with_rag['correct'] - results_without_rag['correct']
+        if diff > 0:
+            print(f"\n📈 IMPROVEMENT: +{diff} problems correctly classified with RAG")
+        elif diff < 0:
+            print(f"\n📉 REGRESSION: {abs(diff)} fewer problems correctly classified with RAG")
+        else:
+            print(f"\n➡️  NO CHANGE: Same accuracy with and without RAG")
+
+        # Show which problems changed
+        errors_without = {e['id'] for e in results_without_rag['errors']}
+        errors_with = {e['id'] for e in results_with_rag['errors']}
+
+        fixed_by_rag = errors_without - errors_with
+        broken_by_rag = errors_with - errors_without
+
+        if fixed_by_rag:
+            print(f"\n✅ Fixed by RAG ({len(fixed_by_rag)}):")
+            for problem_id in fixed_by_rag:
+                print(f"   - {problem_id}")
+
+        if broken_by_rag:
+            print(f"\n❌ Broken by RAG ({len(broken_by_rag)}):")
+            for problem_id in broken_by_rag:
+                print(f"   - {problem_id}")
+
+        print()
+        return 0 if len(results_with_rag['errors']) == 0 else 1
+
+    # Normal mode (not comparison)
+    # Initialize knowledge base if --show-rag is enabled
+    kb = None
+    if args.show_rag:
+        try:
+            print("Loading RAG knowledge base...")
+            kb = KnowledgeBase()
+            print(f"✓ RAG knowledge base loaded\n")
+        except Exception as e:
+            print(f"⚠️  Could not load knowledge base: {e}")
+            print("Continuing without RAG...\n")
+
     # Initialize LLM client
     try:
-        llm_client = EnhancedLLMClient(host=args.host, model=args.model)
+        llm_client = EnhancedLLMClient(host=args.host, model=args.model, knowledge_base=kb)
         print(f"✓ Connected to {args.host} using model {args.model}\n")
     except Exception as e:
         print(f"✗ Failed to connect to LLM: {e}")
         return 1
 
     # Run classification tests
-    classification_results = test_classification(problems, llm_client)
+    classification_results = test_classification(problems, llm_client, show_rag=args.show_rag)
 
     # Run schema extraction tests if requested
     schema_results = None

@@ -14,7 +14,7 @@ EXPECTED OUTPUT:
     ✓ Average cost per bottle: €2.79
 
 RUN: python tests/test_end_to_end_workflow.py
-REQUIRES: Ollama (localhost:11434), qwen2:7b model
+REQUIRES: Ollama (localhost:11434), deepseek-r1:latest model
 """
 
 import sys
@@ -23,7 +23,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from llm.enhanced_client import EnhancedLLMClient
 from agent.core import OptimizationAgent
-from or_problem_repository import get_problem_by_name
+from tests.or_problem_repository import get_problem_by_name
+from config import Config
 import matplotlib.pyplot as plt
 import numpy as np
 from datetime import datetime
@@ -225,8 +226,8 @@ def main():
 
     try:
         llm_client = EnhancedLLMClient(
-            host="http://localhost:11434",
-            model="qwen2:7b"
+            host=Config.OLLAMA_HOST,
+            model=Config.OLLAMA_MODEL
         )
         agent = OptimizationAgent(llm_client)
         print("✓ Agent initialized successfully")

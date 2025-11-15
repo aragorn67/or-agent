@@ -5,31 +5,52 @@ from .ollama_client import OllamaClient
 from .transportation_specialist import TransportationSpecialist
 from .scheduling_specialist import SchedulingSpecialist
 from .problem_classifier import ProblemClassifier
+from config import Config
 
 class EnhancedLLMClient(LLMClient):
-    """Enhanced LLM client with problem-specific specialists"""
+    """
+    Enhanced LLM client with multi-model pipeline.
+
+    Uses different specialized models for different stages:
+    - Classification: qwen2:7b-instruct (fast, accurate)
+    - Extraction: llama3.1:8b-instruct-q8_0 (structured JSON)
+    - Reasoning: deepseek-r1:latest (explanations, what-ifs)
+    """
 
     def __init__(
         self,
-        host: str = "http://localhost:11434",
-        model: str = "qwen2:7b",
+        host: str = None,
+        model: str = None,  # Deprecated: kept for backward compatibility
         knowledge_base=None
     ):
         """
-        Initialize enhanced LLM client.
+        Initialize enhanced LLM client with multi-model pipeline.
 
         Args:
-            host: Ollama host URL
-            model: Model name
+            host: Ollama host URL (default from Config)
+            model: Deprecated - models now auto-selected per stage
             knowledge_base: Optional KnowledgeBase for RAG
         """
-        self.base_client = OllamaClient(host, model)
+        if host is None:
+            host = Config.OLLAMA_HOST
+
+        self.host = host
         self.kb = knowledge_base
 
-        # Initialize classifier and specialists (with KB)
-        self.classifier = ProblemClassifier(self.base_client)
-        self.transportation = TransportationSpecialist(self.base_client, knowledge_base)
-        self.scheduling = SchedulingSpecialist(self.base_client, knowledge_base)
+        # Stage A: Classification (qwen2:7b-instruct)
+        self.classification_client = OllamaClient(host, Config.CLASSIFICATION_MODEL)
+        self.classifier = ProblemClassifier(self.classification_client)
+
+        # Stage B: Parameter Extraction (llama3.1:8b-instruct-q8_0)
+        self.extraction_client = OllamaClient(host, Config.EXTRACTION_MODEL)
+        self.transportation = TransportationSpecialist(self.extraction_client, knowledge_base)
+        self.scheduling = SchedulingSpecialist(self.extraction_client, knowledge_base)
+
+        # Stage E: Reasoning & Explanations (deepseek-r1:latest)
+        self.reasoning_client = OllamaClient(host, Config.REASONING_MODEL)
+
+        # Legacy: base_client points to classification for backward compatibility
+        self.base_client = self.classification_client
 
         # Future specialists can be added here:
         # self.assignment = AssignmentSpecialist(self.base_client, knowledge_base)
@@ -39,27 +60,32 @@ class EnhancedLLMClient(LLMClient):
         """Classify problem type using structured schema-based classifier"""
         classification, votes = self.classifier.classify(description)
 
-        # Convert to legacy format for compatibility
-        legacy_format = {
-            "type": classification["problem_type"].upper(),
+        # Convert to format with both legacy fields and new solver_id
+        result = {
+            "type": classification["problem_type"].upper(),  # legacy field
+            "problem_type": classification["problem_type"],  # new field
+            "solver_id": classification.get("solver_id", "none"),  # NEW: specific solver
             "confidence": classification["confidence"],
             "signals": classification["signals"],
             "evidence": classification["evidence"],
             "reasoning": classification["why_short"],
+            "objective": classification.get("objective", {}),
             "votes": votes  # Include all votes for debugging
         }
 
-        return legacy_format
+        return result
 
     def extract_parameters(self, description: str, problem_type: str, example: Dict) -> Dict[str, Any]:
         """Route to appropriate specialist based on problem type"""
 
         problem_type = (problem_type or "").upper()
 
-        if problem_type == "TRANSPORTATION":
+        # Transportation family (includes min_cost_flow if bipartite)
+        if problem_type in ["TRANSPORTATION", "MIN_COST_FLOW"]:
             return self.transportation.extract_parameters(description)
 
-        elif problem_type == "SCHEDULING":
+        # Scheduling family
+        elif problem_type in ["SCHEDULING", "SINGLE_STAGE_SCHEDULING", "SINGLE_MACHINE_TARDINESS", "JOB_SHOP"]:
             return self.scheduling.extract_parameters(description)
 
         # Future problem types:
@@ -72,7 +98,9 @@ class EnhancedLLMClient(LLMClient):
 
     def explain_solution(self, solution: Dict, problem_type: str, original_description: str = "") -> Dict[str, Any]:
         """
-        Generate clean, factual explanation with proper units.
+        Generate clean, factual explanation with proper units using REASONING model.
+
+        Uses deepseek-r1:latest for intelligent explanations and analysis.
 
         Returns:
             {
@@ -85,8 +113,8 @@ class EnhancedLLMClient(LLMClient):
 
         from .solution_formatter import SolutionFormatter
 
-        # Use generic solution formatter for all problem types
-        formatter = SolutionFormatter(self.base_client)
+        # Use reasoning client (deepseek-r1) for intelligent explanations
+        formatter = SolutionFormatter(self.reasoning_client)
         result = formatter.format_solution(solution, problem_type, original_description)
 
         # Return full dict instead of just explanation string

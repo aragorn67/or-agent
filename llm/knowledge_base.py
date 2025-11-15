@@ -5,7 +5,7 @@ Loads PDF documents (PhD thesis, OR papers) and makes them searchable
 for improving LLM's domain understanding.
 
 Usage:
-    kb = KnowledgeBase("knowledge/papers", "knowledge/vectorstore")
+    kb = KnowledgeBase("ML_approaches/RAG/papers", "ML_approaches/RAG/vectorstore")
     kb.load_papers()
     kb.build_index()
     context = kb.get_context("transportation problem", max_tokens=500)
@@ -34,8 +34,8 @@ class KnowledgeBase:
 
     def __init__(
         self,
-        papers_dir: str = "knowledge/papers",
-        vectorstore_dir: str = "knowledge/vectorstore",
+        papers_dir: str = "ML_approaches/RAG/papers",
+        vectorstore_dir: str = "ML_approaches/RAG/vectorstore",
         embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     ):
         """
@@ -76,7 +76,7 @@ class KnowledgeBase:
 
         if not pdf_files:
             logger.warning(f"No PDF files found in {self.papers_dir}")
-            logger.info("Add PDF files to knowledge/papers/ directory")
+            logger.info("Add PDF files to ML_approaches/RAG/papers/ directory")
             return 0
 
         logger.info(f"Found {len(pdf_files)} PDF files")

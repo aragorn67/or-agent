@@ -1,28 +1,25 @@
 #!/usr/bin/env python3
 """
-TEST: Problem Classification Runner (Phase 1)
+TEST: Problem Classification Runner - OR Repository Edition
 
-PURPOSE: Test classifier on Phase 1 test cases with detailed analysis
+PURPOSE: Test classifier on OR problem repository with detailed analysis
 TESTS: Classification → Confidence → JSON structure → Missing keys → Optional solve
-PROBLEMS: phase1_test_cases.py (assignment, knapsack, scheduling, transportation, etc.)
+PROBLEMS: or_problem_repository.py (transportation, scheduling, assignment, etc.)
 
 EXPECTED OUTPUT:
-    ✓ Tests all Phase 1 cases across multiple categories
+    ✓ Tests problems from OR repository
     ✓ Detailed output per problem: type, confidence, signals, structure
     ✓ Problem structure analysis (variables, parameters, constraints)
     ✓ Missing element detection
-    ✓ Optional solving for transportation/scheduling problems
-    ✓ Verification of scheduling solutions
     ✓ Per-category and overall accuracy summary
-    ✓ JSON output saved to test_output/phase1_results_{timestamp}.json
+    ✓ JSON output saved to test_output/or_repo_results_{timestamp}.json
 
 RUN: python tests/test_problem_classification_runner.py
-REQUIRES: Ollama (localhost:11434), qwen2:7b model
+REQUIRES: Ollama (localhost:11434), deepseek-r1:latest model
 OPTIONS:
-    --categories SCHEDULING TRANSPORTATION  # Test specific categories only
-    --no-save                               # Don't save JSON results
-NOTE: Uses phase1_test_cases.py (legacy). Consider migrating to or_problem_repository.
-WARNING: This test is slow - tests many problems with detailed analysis
+    --filter transport,scheduling  # Test only transport and scheduling
+    --solvable                     # Test only solvable problems
+    --no-save                      # Don't save JSON results
 """
 
 import sys
@@ -35,9 +32,9 @@ import json
 import time
 from datetime import datetime
 from typing import Dict, List, Tuple, Optional
-from llm.enhanced_client import EnhancedLLMClient
+from llm.ollama_client import OllamaClient
 from llm.problem_classifier import ProblemClassifier
-from tests.phase1_test_cases import ALL_TEST_CASES
+from tests.or_problem_repository import get_all_problems, get_solvable_problems
 from solvers import get_solver
 
 # Colors
@@ -442,141 +439,123 @@ def print_test_result(case_num: int, total: int, test_case: Dict, structure: Dic
     return passed
 
 
-def run_phase1_tests(save_json: bool = True, categories: List[str] = None):
+def run_or_repo_tests(save_json: bool = True, filter_types: List[str] = None, solvable_only: bool = False):
     """
-    Run Phase 1 classification tests with detailed analysis
+    Run classification tests on OR problem repository with detailed analysis
 
     Args:
         save_json: Whether to save results to JSON file
-        categories: List of categories to test (e.g., ['SCHEDULING', 'TRANSPORTATION'])
-                   If None, all categories will be tested
+        filter_types: List of problem types/categories to test (e.g., ['transportation', 'single_stage_scheduling'])
+                     If None, all problems will be tested
+        solvable_only: Only test problems marked as solvable
     """
 
     print(f"\n{C.BOLD}{C.BLUE}")
     print("╔══════════════════════════════════════════════════════════════════════════════╗")
-    print("║              PHASE 1 CLASSIFICATION TEST SUITE                               ║")
-    print("║         Detailed Analysis: Type, Confidence, Structure, Missing Keys        ║")
+    print("║              OR REPOSITORY CLASSIFICATION TEST                               ║")
+    print("║         Detailed Analysis: Type, Confidence, Structure                       ║")
     print("╚══════════════════════════════════════════════════════════════════════════════╝")
     print(f"{C.END}\n")
 
-    # Filter test cases by category if specified
-    test_cases_to_run = ALL_TEST_CASES
-    if categories:
-        categories_upper = [cat.upper() for cat in categories]
-        test_cases_to_run = [(cat, cases) for cat, cases in ALL_TEST_CASES
-                             if cat.upper() in categories_upper]
+    # Get problems from repository
+    if solvable_only:
+        problems = get_solvable_problems()
+        print(f"{C.YELLOW}Testing only solvable problems{C.END}")
+    else:
+        problems = get_all_problems()
 
-        if not test_cases_to_run:
-            print(f"{C.RED}❌ No matching categories found. Available: {[cat for cat, _ in ALL_TEST_CASES]}{C.END}")
+    # Filter by type/category if specified
+    if filter_types:
+        filter_lower = [f.lower() for f in filter_types]
+        problems = [
+            p for p in problems
+            if p['category'].lower() in filter_lower or p['expected_type'].lower() in filter_lower
+        ]
+        if not problems:
+            print(f"{C.RED}❌ No matching problems found for filters: {filter_types}{C.END}")
             return []
-
-        print(f"{C.YELLOW}Running only: {[cat for cat, _ in test_cases_to_run]}{C.END}\n")
+        print(f"{C.YELLOW}Filtered to {len(problems)} problems matching: {filter_types}{C.END}\n")
+    else:
+        print(f"Testing {len(problems)} problems from repository\n")
 
     # Initialize
     print(f"{C.YELLOW}Initializing LLM classifier...{C.END}")
     try:
-        client = EnhancedLLMClient()
+        # Try available models in order of preference
+        available_models = ['deepseek-r1:latest', 'llama3.1:8b-instruct-q8_0', 'qwen2:7b-instruct', 'mistral:7b-instruct']
+        model = available_models[0]  # Use deepseek-r1 by default
+
+        client = OllamaClient(host='http://localhost:11434', model=model)
         classifier = ProblemClassifier(client)
-        print(f"{C.GREEN}✅ Ready{C.END}\n")
+        print(f"{C.GREEN}✅ Ready (using {model}){C.END}\n")
     except Exception as e:
         print(f"{C.RED}❌ Failed: {e}{C.END}")
         return []
 
     # Run tests
     all_results = []
-    case_num = 0
-    total_cases = sum(len(cases) for _, cases in test_cases_to_run)
+    total_cases = len(problems)
 
-    for category, cases in test_cases_to_run:
-        print(f"\n{C.BOLD}{C.MAGENTA}{'═' * 80}")
-        print(f"{category} PROBLEMS ({len(cases)} tests)")
-        print(f"{'═' * 80}{C.END}")
+    for case_num, problem in enumerate(problems, 1):
+        problem_id = problem['id']
+        problem_name = problem['name']
+        category = problem['category']
+        expected_type = problem['expected_type']
+        text = problem['text']
+        is_solvable = problem.get('solvable', False)
 
-        for test_case in cases:
-            case_num += 1
-            text = test_case["text"]
-            expected = test_case["expected"]
+        # Analyze
+        start = time.time()
+        try:
+            print(f"\n{C.BOLD}{C.MAGENTA}[{case_num}/{total_cases}] {problem_id}{C.END}")
 
-            # Analyze
-            start = time.time()
-            try:
-                structure = analyze_problem_structure(text, classifier)
-                classified = structure["problem_type"]
+            structure = analyze_problem_structure(text, classifier)
+            classified = structure["problem_type"]
 
-                # Try to solve if transportation or scheduling subcategory AND marked as solvable
-                solve_result = None
-                is_solvable = test_case.get("solvable", False)
+            # Check correctness
+            passed = (classified.lower() == expected_type.lower())
+            elapsed_ms = (time.time() - start) * 1000
 
-                # Check if it's a scheduling subcategory or transportation
-                scheduling_types = ["job_shop", "flow_shop", "single_stage_scheduling", "shift_rostering", "project_scheduling"]
-                is_scheduling = classified.lower() in scheduling_types
-                is_transportation = classified.lower() == "transportation"
+            # Print compact result
+            status = f"{C.GREEN}✅" if passed else f"{C.RED}❌"
+            print(f"{status} Expected: {expected_type:30s} | Got: {classified:30s} ({structure['confidence']:.0%})")
 
-                if (is_scheduling or is_transportation) and is_solvable:
-                    category = "SCHEDULING" if is_scheduling else "TRANSPORTATION"
-                    print(f"\n   {C.CYAN}Attempting to solve {classified} problem [{category}] (solvable=True)...{C.END}")
-                    solve_result = try_solve_problem(classified, text, client)
+            if not passed:
+                print(f"   {C.YELLOW}Why: {structure['why']}{C.END}")
 
-                    # Verify scheduling solutions
-                    if solve_result and solve_result.get("success") and is_scheduling:
-                        expected_solution = test_case.get("expected_solution")
-                        verification = verify_scheduling_solution(
-                            solve_result, test_case["name"], expected_solution
-                        )
-                        solve_result["verification"] = verification
-                elif (is_scheduling or is_transportation) and not is_solvable:
-                    category = "SCHEDULING" if is_scheduling else "TRANSPORTATION"
-                    print(f"\n   {C.YELLOW}Skipping solve for {classified} [{category}] (solvable=False){C.END}")
+            # Store result
+            result = {
+                "test_number": case_num,
+                "problem_id": problem_id,
+                "problem_name": problem_name,
+                "category": category,
+                "expected_type": expected_type,
+                "classified_as": classified,
+                "confidence": structure["confidence"],
+                "objective": structure["objective"],
+                "passed": passed,
+                "time_ms": elapsed_ms,
+                "structure": structure["identified_elements"],
+                "signals": structure["signals"],
+                "why": structure["why"],
+                "solvable": is_solvable
+            }
 
-                elapsed_ms = (time.time() - start) * 1000
+            all_results.append(result)
 
-                # Print result
-                passed = print_test_result(case_num, total_cases, test_case,
-                                          structure, expected, elapsed_ms, solve_result)
-
-                # Store result
-                result = {
-                    "test_number": case_num,
-                    "category": category,
-                    "name": test_case["name"],
-                    "expected": expected,
-                    "classified_as": structure["problem_type"],
-                    "confidence": structure["confidence"],
-                    "objective": structure["objective"],  # Include LLM-extracted objective
-                    "passed": passed,
-                    "time_ms": elapsed_ms,
-                    "structure": structure["identified_elements"],
-                    "signals": structure["signals"],
-                    "why": structure["why"],
-                    "missing_elements": check_missing_keys(structure, test_case.get("key_elements", [])),
-                    "problem_text": text[:200] + "..."  # Truncated
-                }
-
-                # Add solve result if available
-                if solve_result:
-                    result["solve_attempted"] = True
-                    result["solve_success"] = solve_result.get("success", False)
-                    if solve_result.get("success"):
-                        sol = solve_result["solution"]
-                        result["solution_status"] = sol.get("status")
-                        result["solution_objective"] = sol.get("objective")
-                        if "verification" in solve_result:
-                            result["verification"] = solve_result["verification"]
-
-                all_results.append(result)
-
-            except Exception as e:
-                print(f"\n{C.RED}❌ ERROR: {e}{C.END}")
-                all_results.append({
-                    "test_number": case_num,
-                    "category": category,
-                    "name": test_case["name"],
-                    "expected": expected,
-                    "classified_as": "ERROR",
-                    "confidence": 0.0,
-                    "passed": False,
-                    "error": str(e)
-                })
+        except Exception as e:
+            print(f"\n{C.RED}❌ ERROR: {e}{C.END}")
+            all_results.append({
+                "test_number": case_num,
+                "problem_id": problem_id,
+                "problem_name": problem_name,
+                "category": category,
+                "expected_type": expected_type,
+                "classified_as": "ERROR",
+                "confidence": 0.0,
+                "passed": False,
+                "error": str(e)
+            })
 
     # Summary
     print(f"\n\n{C.BOLD}{C.CYAN}{'═' * 80}")
@@ -597,28 +576,48 @@ def run_phase1_tests(save_json: bool = True, categories: List[str] = None):
 
     # Per-category breakdown
     print(f"{C.YELLOW}Per-Category Results:{C.END}")
-    for category, _ in test_cases_to_run:
+    categories = set(r.get("category") for r in all_results)
+    for category in sorted(categories):
         cat_results = [r for r in all_results if r.get("category") == category]
         cat_passed = sum(1 for r in cat_results if r.get("passed", False))
         cat_total = len(cat_results)
         cat_rate = (cat_passed / cat_total * 100) if cat_total > 0 else 0
         print(f"  {category:25s}: {cat_passed}/{cat_total} ({cat_rate:.0f}%)")
 
+    # Per-expected-type breakdown
+    print(f"\n{C.YELLOW}Per-Problem-Type Results:{C.END}")
+    expected_types = set(r.get("expected_type") for r in all_results)
+    for exp_type in sorted(expected_types):
+        type_results = [r for r in all_results if r.get("expected_type") == exp_type]
+        type_passed = sum(1 for r in type_results if r.get("passed", False))
+        type_total = len(type_results)
+        type_rate = (type_passed / type_total * 100) if type_total > 0 else 0
+        status = '✅' if type_rate == 100 else '❌'
+        print(f"  {status} {exp_type:35s}: {type_passed}/{type_total} ({type_rate:.0f}%)")
+
     # Failed tests
     if failed > 0:
         print(f"\n{C.RED}Failed Tests:{C.END}")
         for r in all_results:
             if not r.get("passed", False):
-                print(f"  ❌ [{r['category']}] {r['name']}")
-                print(f"     Expected: {r['expected']} | Got: {r.get('classified_as', 'ERROR')} ({r.get('confidence', 0):.0%})")
+                print(f"  ❌ {r['problem_id']}")
+                print(f"     Expected: {r['expected_type']} | Got: {r.get('classified_as', 'ERROR')} ({r.get('confidence', 0):.0%})")
+
+    # Goal achievement message
+    if pass_rate == 100:
+        print(f"\n{C.GREEN}{C.BOLD}🎉 SUCCESS: 100% classification accuracy achieved!{C.END}")
+        print(f"{C.GREEN}   Ready to proceed with parameter extraction.{C.END}\n")
+    else:
+        print(f"\n{C.YELLOW}⚠️  INCOMPLETE: {failed}/{total} problems misclassified{C.END}")
+        print(f"{C.YELLOW}   Need to investigate classification failures.{C.END}\n")
 
     # Save to JSON
     if save_json:
         try:
-            filename = save_results_to_json(all_results, "test_output/phase1_results")
-            print(f"\n{C.GREEN}✅ Results saved to: {filename}{C.END}")
+            filename = save_results_to_json(all_results, "test_output/or_repo_results")
+            print(f"{C.GREEN}✅ Results saved to: {filename}{C.END}\n")
         except Exception as e:
-            print(f"\n{C.YELLOW}⚠️  Could not save JSON: {e}{C.END}")
+            print(f"{C.YELLOW}⚠️  Could not save JSON: {e}{C.END}\n")
 
     return all_results
 
@@ -628,22 +627,30 @@ if __name__ == "__main__":
 
     # Parse command-line arguments
     parser = argparse.ArgumentParser(
-        description='Run Phase 1 classification tests',
+        description='Run OR repository classification tests',
         epilog='''
 Examples:
-  python test_phase1_runner.py                          # Run all tests
-  python test_phase1_runner.py --categories SCHEDULING  # Run only scheduling tests
-  python test_phase1_runner.py --categories SCHEDULING TRANSPORTATION  # Run scheduling and transportation
-  python test_phase1_runner.py --no-save                # Don't save JSON results
+  python test_problem_classification_runner.py                                    # Run all tests
+  python test_problem_classification_runner.py --filter transportation            # Run only transport
+  python test_problem_classification_runner.py --filter transportation,scheduling # Run transport and scheduling
+  python test_problem_classification_runner.py --filter single_stage_scheduling  # Run single-stage scheduling
+  python test_problem_classification_runner.py --solvable                         # Run only solvable problems
+  python test_problem_classification_runner.py --no-save                          # Don't save JSON results
         ''',
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
 
     parser.add_argument(
-        '--categories',
-        nargs='+',
-        metavar='CATEGORY',
-        help='Test categories to run (e.g., SCHEDULING, TRANSPORTATION, ASSIGNMENT, etc.)'
+        '--filter',
+        type=str,
+        metavar='TYPES',
+        help='Comma-separated list of problem types/categories to test (e.g., transportation,single_stage_scheduling)'
+    )
+
+    parser.add_argument(
+        '--solvable',
+        action='store_true',
+        help='Test only problems marked as solvable'
     )
 
     parser.add_argument(
@@ -654,13 +661,19 @@ Examples:
 
     args = parser.parse_args()
 
+    # Parse filter list
+    filter_types = None
+    if args.filter:
+        filter_types = [f.strip() for f in args.filter.split(',')]
+
     # Create output directory if needed
     Path("test_output").mkdir(exist_ok=True)
 
     # Run tests
-    results = run_phase1_tests(
+    results = run_or_repo_tests(
         save_json=not args.no_save,
-        categories=args.categories
+        filter_types=filter_types,
+        solvable_only=args.solvable
     )
 
     # Exit code

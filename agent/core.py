@@ -107,6 +107,7 @@ class OptimizationAgent:
             available_types = list_problem_types()
             classification = self.llm.classify_problem(description, available_types)
             problem_type = classification.get('type', 'TRANSPORTATION')
+            solver_id = classification.get('solver_id', 'none')  # NEW: get specific solver
             confidence = classification.get('confidence', 0.5)
 
             update_progress(f"Identified as {problem_type} problem", 25)
@@ -121,10 +122,18 @@ class OptimizationAgent:
                     "confidence": confidence
                 }
 
-            # Step 2: Map problem type to solver
-            # Some problem types are subcategories that map to a generic solver
-            solver_type = self._map_to_solver(problem_type)
-            solver = get_solver(solver_type.lower())
+            # Check if we have a solver for this problem
+            if solver_id == "none":
+                return {
+                    "success": False,
+                    "error": f"Problem type '{problem_type}' is recognized but not yet supported by our solvers.",
+                    "suggestion": "Currently supported: bipartite transportation (plants→markets), single-stage scheduling.",
+                    "problem_type": problem_type,
+                    "confidence": confidence
+                }
+
+            # Step 2: Get solver by solver_id (NEW ARCHITECTURE)
+            solver = get_solver(solver_id)
 
             update_progress("Extracting parameters from description...", 40)
 
