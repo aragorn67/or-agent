@@ -40,3 +40,7 @@ solutions/
 # RAG Knowledge Base
 knowledge/papers/*.pdf
 knowledge/vectorstore/
+# RAG training files (too large for GitHub)
+ML_approaches/RAG/papers/
+ML_approaches/RAG/vectorstore/
+knowledge/
