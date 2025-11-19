@@ -40,6 +40,7 @@ Extract parameters for a Transportation LP. Output STRICT JSON with keys:{rag_co
 - capacity: {{plant: number}} (how much each plant can produce/supply)
 - demand: {{market: number}} (how much each market needs)
 - cost: {{plant: {{market: number}}}} (per-unit shipping cost from plant to market)
+- arc_capacity: {{plant: {{market: number}}}} (OPTIONAL: maximum flow on individual routes/lanes. e.g., "From F1 to A: max 50 units, to B: 30, to C: 0" means arc_capacity={{F1: {{A: 50, B: 30, C: 0}}}}. INCLUDE ZERO CAPACITIES! Zero means blocked route.)
 - constraints: string[] (optional: special restrictions like "Plant A cannot serve Market X")
 - integer_shipments: boolean (optional, default false - if shipments must be whole numbers)
 - allow_unbalanced: boolean (optional, default false - if total supply != total demand is OK)
@@ -51,8 +52,11 @@ EXTRACTION RULES:
 4. Extract ALL demand values mentioned (e.g., "Chicago needs 300 units")
 5. Extract distance/cost information - convert to per-unit shipping costs
 6. If freight rate given (e.g., "$90 per unit per 1000 miles"), combine with distances
-7. If ANY required piece is missing, return: {{"error": "<specific missing information>"}}
-8. All numbers must be numeric types, not strings
+7. **IMPORTANT: Extract arc_capacity if problem mentions "maximum shipping capacity", "lane capacity", "route limits", or "from X to Y: max N units"**
+8. **CRITICAL: When extracting arc_capacity, include ALL routes mentioned, even if capacity is 0! A capacity of 0 means that route is blocked. Missing entries will be treated as infinite capacity!**
+9. **If cost values are not specified or text says "values not important", use $1 per unit for all routes**
+9. If ANY required piece (except cost) is missing, return: {{"error": "<specific missing information>"}}
+10. All numbers must be numeric types, not strings
 """
 
         user = f"TRANSPORTATION PROBLEM:\n{description}\n\nReturn ONLY the JSON."
@@ -79,16 +83,22 @@ EXTRACTION RULES:
     def _validate_transportation_deep(self, description: str, params: Dict) -> str:
         """Deep validation specifically for transportation problems"""
 
-        # Core structure validation
-        required = ["plants", "markets", "capacity", "demand", "cost"]
+        # Core structure validation (cost is optional - can default to $1)
+        required = ["plants", "markets", "capacity", "demand"]
         missing = [k for k in required if k not in params or not params[k]]
         if missing:
-            return f"Missing required transportation data: {', '.join(missing)}. Please specify all factories, customers, capacities, demands, and shipping costs."
+            return f"Missing required transportation data: {', '.join(missing)}. Please specify all factories, customers, capacities, and demands."
 
         plants = params["plants"]
         markets = params["markets"]
         capacity = params["capacity"]
         demand = params["demand"]
+
+        # Cost is optional - generate default if missing
+        if "cost" not in params or not params["cost"]:
+            # Default to $1 per unit for all routes
+            params["cost"] = {plant: {market: 1 for market in markets} for plant in plants}
+
         cost = params["cost"]
 
         # Entity alignment validation
@@ -136,11 +146,8 @@ EXTRACTION RULES:
                     return f"Shipping cost from '{plant}' to '{market}' must be a non-negative number, got: {cost_val}"
 
         # Transportation-specific business logic checks
-        total_capacity = sum(capacity.values())
-        total_demand = sum(demand.values())
-
-        if total_capacity < total_demand and not params.get("allow_unbalanced", False):
-            return f"Total capacity ({total_capacity}) is less than total demand ({total_demand}). This problem is infeasible unless you allow unmet demand."
+        # NOTE: We no longer validate feasibility here - that's done by the feasibility module
+        # The extraction should extract parameters even if they describe an infeasible problem
 
         # Prose vs extracted validation
         import re

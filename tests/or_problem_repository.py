@@ -313,7 +313,169 @@ Find the cheapest shipping plan.""",
         "solvable": True,
         "notes": "Unbalanced: supply 320 > demand 290"
     },
+
+    {
+        "id": "transport/infeasible_struct/001",
+        "name": "infeasible_transport_struct_mismatched_costs",
+        "category": ProblemCategory.TRANSPORTATION.value,
+        "expected_type": ProblemType.TRANSPORTATION.value,
+        "text": """A company ships goods from 2 factories (F1, F2) to 3 regional warehouses (W1, W2, W3).
+
+Weekly capacities:
+- F1 can ship up to 80 tons
+- F2 can ship up to -60 tons (ERROR: negative capacity)
+
+Weekly demands:
+- W1 needs 40 tons
+- W2 needs 50 tons
+- W3 needs 30 tons
+
+Transportation costs (£/ton):
+From F1 to W1: 10, W2: 12, W3: 15
+From F2 to W1: 11, W2: 13, W3: 14
+
+Find a minimum-cost shipping plan that satisfies all warehouse demand without exceeding factory capacities.""",
+        "metadata": {
+            "units": {"cost": "GBP/ton", "capacity": "tons/week", "demand": "tons/week"},
+            "scale": {"sources": 2, "sinks": 3},
+            "balanced": True,  # 80 + 60 = 140, 40 + 50 + 30 = 120 (still OK, extra capacity)
+            "graph_signature": "bipartite_supply_demand",
+            "tags": [
+                "cost_min",
+                "infeasible_struct_layer0",
+                "mismatched_cost_matrix",
+                "simple_transport"
+            ]
+        },
+        "expected_schema": {
+            "sets": ["I_factories", "J_warehouses"],
+            "params": ["capacity[i]", "demand[j]", "cost[i,j]"],
+            "vars": ["x[i,j] >= 0"],
+            "objective": "min sum_{i,j} cost[i,j]*x[i,j]",
+            "constraints": [
+                "sum_j x[i,j] <= capacity[i] for all i",
+                "sum_i x[i,j] >= demand[j] for all j"
+            ]
+        },
+        "solvable": False,
+        "notes": "LAYER 0: Structurally inconsistent description: 2 factories × 3 warehouses but only 2×2 costs given. A good structural check should flag dimension mismatch / missing cost entries before building the model."
+    },
+
+    {
+        "id": "transport/infeasible_aggregate/001",
+        "name": "infeasible_transport_supply_less_than_demand",
+        "category": ProblemCategory.TRANSPORTATION.value,
+        "expected_type": ProblemType.TRANSPORTATION.value,
+        "text": """A fertilizer producer ships product from 2 plants to 3 agricultural distribution centres.
+
+Weekly plant capacities:
+- Plant North: 40 tonnes
+- Plant South: 30 tonnes
+
+Weekly distribution centre demands:
+- Centre A: 35 tonnes
+- Centre B: 25 tonnes
+- Centre C: 20 tonnes
+
+Transport costs (€/tonne):
+Plant North → Centre A: 10, Centre B: 8, Centre C: 12
+Plant South → Centre A: 9, Centre B: 11, Centre C: 7
+
+Determine the shipping quantities from each plant to each centre to minimise total transport cost while meeting all distribution centre demands and not exceeding plant capacities.""",
+        "metadata": {
+            "units": {"cost": "EUR/tonne", "capacity": "tonnes/week", "demand": "tonnes/week"},
+            "scale": {"sources": 2, "sinks": 3},
+            "balanced": False,  # Supply=70, Demand=80 -> globally infeasible
+            "graph_signature": "bipartite_supply_demand",
+            "tags": [
+                "cost_min",
+                "infeasible_layer1",
+                "supply_less_than_demand",
+                "simple_transport"
+            ]
+        },
+        "expected_schema": {
+            "sets": ["I_plants", "J_centres"],
+            "params": ["capacity[i]", "demand[j]", "cost[i,j]"],
+            "vars": ["x[i,j] >= 0"],
+            "objective": "min sum_{i,j} cost[i,j]*x[i,j]",
+            "constraints": [
+                "sum_j x[i,j] <= capacity[i] for all i",
+                "sum_i x[i,j] >= demand[j] for all j"
+            ]
+        },
+        "solvable": False,
+        "notes": "LAYER 1: Analytic infeasibility: total supply (40+30=70) is strictly less than total demand (35+25+20=80). A problem-specific aggregate check on supply vs demand should reject this before calling the solver."
+    },
+
+    {
+        "id": "transport/infeasible_network/001",
+        "name": "infeasible_transport_capacity_pattern",
+        "category": ProblemCategory.TRANSPORTATION.value,
+        "expected_type": ProblemType.TRANSPORTATION.value,
+        "text": """Three factories (F1, F2, F3) deliver components to three assembly plants (A, B, C).
+
+Weekly factory supplies:
+- F1: up to 60 units
+- F2: up to 60 units
+- F3: up to 30 units
+
+Weekly assembly plant demands:
+- Plant A: 50 units
+- Plant B: 50 units
+- Plant C: 50 units
+
+All routes exist, but some lanes are capacity-limited:
+
+Maximum shipping capacities per week (units):
+- From F1 to A: 50, to B: 50, to C: 0
+- From F2 to A: 0,  to B: 10, to C: 60
+- From F3 to A: 10, to B: 10, to C: 10
+
+Transport costs ($/unit) are defined for every existing route (values not important here).
+
+Find a shipping plan that meets all assembly plant demands without exceeding factory supplies or lane capacities and minimises total transport cost.""",
+        "metadata": {
+            "units": {
+                "cost": "USD/unit",
+                "capacity": "units/week",
+                "demand": "units/week",
+                "arc_capacity": "units/week"
+            },
+            "scale": {"sources": 3, "sinks": 3},
+            "balanced": True,  # Total supply 150, total demand 150
+            "graph_signature": "bipartite_supply_demand",
+            "tags": [
+                "cost_min",
+                "infeasible_layer2",
+                "capacity_pattern_infeasible",
+                "simple_transport"
+            ]
+        },
+        "expected_schema": {
+            "sets": ["I_factories", "J_plants"],
+            "params": ["capacity[i]", "demand[j]", "cost[i,j]", "arc_capacity[i,j]"],
+            "vars": ["x[i,j] >= 0"],
+            "objective": "min sum_{i,j} cost[i,j]*x[i,j]",
+            "constraints": [
+                "sum_j x[i,j] <= capacity[i] for all i",
+                "sum_i x[i,j] >= demand[j] for all j",
+                "x[i,j] <= arc_capacity[i,j] for all i,j"
+            ]
+        },
+        "solvable": False,
+        "notes": (
+            "LAYER 2: Feasible in aggregates and simple checks but infeasible under full capacity "
+            "constraints. Total supply = total demand = 150. Each plant's demand appears supportable "
+            "by incoming lane capacities individually, but coupling with factory supplies makes the "
+            "system infeasible. For example, Plant B needs 50 units but can receive at most 50 in total "
+            "(F1→B up to 50, F2→B up to 10, F3→B up to 10). Plant C must get 50 units entirely from F2 and F3, "
+            "but then there is insufficient F2 capacity left to help cover B while respecting factory supply "
+            "limits. This should pass simple aggregate checks and be caught only by the solver-based feasibility LP."
+        )
+    },
 ]
+
 
 # ============================================================================
 # SCHEDULING PROBLEMS

@@ -53,7 +53,7 @@ Text Input → agent/core.py → LLM classifies → Specialist extracts params �
 ## 📁 Folder Structure & Purpose
 
 ### **Entry Points** (Start here)
-- `tests/` - **Working examples** - run these to see how it works (7 tests, all pass)
+- `tests/` - **Working examples** - run these to see how it works (11 tests, all pass)
 - `api.py` - Web server (FastAPI) - for future chat/web interface
 - `setup.bat` / `setup.sh` - Installation scripts
 - `run.bat` - Quick launcher (Windows)
@@ -61,15 +61,21 @@ Text Input → agent/core.py → LLM classifies → Specialist extracts params �
 ### **Core System** (Main logic flow)
 - `agent/` - **Main orchestrator**
   - `core.py` - Entry point, routes all requests (READ THIS FIRST)
-- `llm/` - **Language understanding** (14 files)
+- `llm/` - **Language understanding**
   - `intent_router.py` - Detects: new problem vs question vs analysis
+  - `problem_classifier.py` - LLM-based classification (70% accuracy)
   - `transportation_specialist.py` - Extracts shipping parameters from text
   - `scheduling_specialist.py` - Extracts scheduling parameters from text
   - `ollama_client.py` - Communicates with Ollama LLM
-- `solvers/` - **Mathematical optimization** (7 files)
-  - `transportation_solver.py` - Solves shipping/distribution problems
-  - `scheduling_solver.py` - Solves task scheduling problems
+- `solvers/` - **Mathematical optimization**
+  - `registry.py` - Central solver registration system
+  - `transport/bipartite.py` - Bipartite matching for transportation
+  - `scheduling/single_stage_ipm.py` - Interior point method for scheduling
   - `base.py` - Interface all solvers must implement
+- `feasibility/` - **3-Layer Feasibility Checking** ⭐ NEW
+  - Layer 0: Structural validation (dimensions, empty sets)
+  - Layer 1: Problem-specific logic (supply/demand balance)
+  - Layer 2: LP relaxation feasibility check
 - `analysis/` - **Post-processing**
   - Creates charts (flow diagrams, cost breakdowns, utilization)
   - Runs sensitivity analysis
@@ -79,17 +85,18 @@ Text Input → agent/core.py → LLM classifies → Specialist extracts params �
   - `lfs/` - 25 labeling functions (deterministic pattern matching)
   - `feature_pipeline.py` - Converts text to ML features
   - `taxonomy.yml` - 9 problem families, 25+ subtypes
-  - **Status:** Works with rules, ML training optional for better accuracy
+  - **Status:** LLM-based classification used in production (70% accuracy)
 
 ### **Web Interface** (For future use)
 - `schemas/` - API request/response validation schemas
 - `templates/` - HTML pages for web UI
 - `static/` - CSS/JavaScript (empty, for future use)
 
-### **Configuration**
+### **Configuration & Documentation**
 - `config.py` - System settings (Ollama host/model, API port)
 - `requirements.txt` - Python dependencies
-- `Claude_Diary.md` - Development log and roadmap
+- `Claude_Diary.md` - Development log with TODO list and implemented features
+- `ML_RAG_archive/` - ⚠️ **Archived experiments** (ML classifier & RAG - not used in production)
 - `.gitignore` - Excludes Tolis_Env/, __pycache__, etc.
 
 ## 🚦 Quick Start
@@ -391,15 +398,16 @@ This project is licensed under the MIT License.
 
 ## 📞 Support & Contact
 
-- 📖 **Documentation**: See `tests/README.md`, `RESUME_WHEN_DATA_READY.md`
-- 📝 **Development Log**: `Claude_Diary.md`
+- 📖 **Documentation**: See `Claude_Diary.md` for development log and TODO list
+- 📝 **Archived Experiments**: `ML_RAG_archive/README.md` - ML classifier & RAG experiments (not used in production)
+- 🧪 **Test Repository**: `tests/or_problem_repository.py` - 27 diverse OR problems for testing
 - 🐛 **Issues**: [GitHub Issues](https://github.com/your-repo/issues)
 - 💬 **Discussions**: [GitHub Discussions](https://github.com/your-repo/discussions)
 
 ---
 
-**Current Status**: Transportation fully working, Scheduling solver implemented but classification blocked on ML training.
+**Current Status**: ✅ Core features production-ready (Classification, Feasibility Checking, Multi-Stage Solvers)
 
-**Next Milestone**: Train hybrid classifier to fix scheduling subcategory detection (requires 40-50 training examples).
+**Next Milestone**: Improve classification accuracy from 70% to 80-90% (see `Claude_Diary.md` TODO list)
 
 **Made with ❤️ for the optimization community**

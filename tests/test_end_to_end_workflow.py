@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 """
-TEST: End-to-End Workflow
+TEST: End-to-End Workflow with Feasibility Checking
 
 PURPOSE: Test complete workflow from problem submission to visualizations
-TESTS: Solve → Multiple analyses → Generate plots → Save outputs
-PROBLEM: european_wine_distribution (from or_problem_repository)
+WORKFLOW: Classify → Extract → Check Feasibility → Solve (if feasible) / Explain (if infeasible)
+PROBLEM: Configurable via command-line argument (default: european_wine_distribution)
 
-EXPECTED OUTPUT:
-    ✓ Optimal solution: €4,750.00
-    ✓ 3 PNG plots: flow_network.png, cost_breakdown.png, capacity_utilization.png
-    ✓ 2 textual analyses: sensitivity analysis, what-if scenario
-    ✓ Summary with all artifacts listed
-    ✓ Average cost per bottle: €2.79
+USAGE:
+    python tests/test_end_to_end_workflow.py [problem_name] [--no-graphs]
 
-RUN: python tests/test_end_to_end_workflow.py
+EXAMPLES:
+    python tests/test_end_to_end_workflow.py european_wine_distribution
+    python tests/test_end_to_end_workflow.py infeasible_transport_capacity_pattern --no-graphs
+    python tests/test_end_to_end_workflow.py us_manufacturing_distribution
+
 REQUIRES: Ollama (localhost:11434), deepseek-r1:latest model
 """
 
@@ -25,6 +25,7 @@ from llm.enhanced_client import EnhancedLLMClient
 from agent.core import OptimizationAgent
 from tests.or_problem_repository import get_problem_by_name
 from config import Config
+from feasibility import check_feasibility, FeasStatus
 import matplotlib.pyplot as plt
 import numpy as np
 from datetime import datetime
@@ -208,16 +209,36 @@ def print_section(title):
 def main():
     """Run the complete workflow"""
 
-    print_section("COMPLETE WORKFLOW TEST: European Wine Distribution")
+    # Parse command-line arguments
+    problem_name = "european_wine_distribution"  # Default
+    generate_graphs = True  # Default
 
-    # Step 1: Define the NEW optimization problem
+    if len(sys.argv) > 1:
+        for arg in sys.argv[1:]:
+            if arg == "--no-graphs":
+                generate_graphs = False
+            elif not arg.startswith("--"):
+                problem_name = arg
+
+    print_section(f"COMPLETE WORKFLOW TEST: {problem_name}")
+
+    # Step 1: Define the optimization problem
     print_section("STEP 1: Define Optimization Problem")
 
     # Get problem from centralized repository
-    problem = get_problem_by_name("european_wine_distribution")
+    problem = get_problem_by_name(problem_name)
+    if not problem:
+        print(f"✗ Error: Problem '{problem_name}' not found in repository")
+        print("\nAvailable problems:")
+        from tests.or_problem_repository import REPOSITORY
+        for p_name in REPOSITORY.keys():
+            print(f"  - {p_name}")
+        return
+
     problem_description = problem["text"]
 
     print(f"Problem: {problem['name']}")
+    print(f"Expected solvable: {problem.get('solvable', 'Unknown')}")
     print("-" * 80)
     print(problem_description)
 
@@ -235,8 +256,150 @@ def main():
         print(f"✗ Error initializing agent: {e}")
         return
 
-    # Step 3: Solve the optimization problem
-    print_section("STEP 3: Solve Optimization Problem")
+    # Step 3: Classify and Extract Parameters
+    print_section("STEP 3: Classify Problem Type and Extract Parameters")
+
+    print("Classifying problem type...")
+    from llm.problem_classifier import ProblemClassifier
+    from llm.ollama_client import OllamaClient
+
+    ollama = OllamaClient(host=Config.OLLAMA_HOST, model=Config.OLLAMA_MODEL)
+    classifier = ProblemClassifier(ollama)
+    classification, votes = classifier.classify(problem_description)
+
+    print(f"✓ Problem type: {classification.get('problem_type', 'UNKNOWN')}")
+    print(f"  Confidence: {classification.get('confidence', 0):.2f}")
+    print(f"  Solver: {classification.get('solver_id', 'UNKNOWN')}")
+
+    print("\nExtracting parameters...")
+    from llm.transportation_specialist import TransportationSpecialist
+    specialist = TransportationSpecialist(ollama)
+    extracted_params = specialist.extract_parameters(problem_description)
+
+    if "error" in extracted_params:
+        print(f"✗ Extraction failed: {extracted_params['error']}")
+        return
+
+    print("✓ Parameters extracted successfully")
+    print(f"  Plants: {len(extracted_params.get('plants', []))}")
+    print(f"  Markets: {len(extracted_params.get('markets', []))}")
+
+    # Step 4: Check Feasibility (NEW!)
+    print_section("STEP 4: Feasibility Checking (3 Layers)")
+
+    print("Running 3-layer feasibility check before optimization...")
+    print("")
+    print("  LAYER 1: Structural Validation")
+    print("    • Check for empty sets, missing data")
+    print("    • Verify dimension consistency")
+    print("    • Validate domain constraints (e.g., no negative values)")
+    print("")
+    print("  LAYER 2: Problem-Specific Necessary Conditions")
+    print("    • Check total supply ≥ total demand")
+    print("    • Verify all markets are reachable")
+    print("    • Validate individual route capacity limits")
+    print("")
+    print("  LAYER 3: Solver-Based LP Relaxation")
+    print("    • Build full optimization model")
+    print("    • Relax integer variables to continuous")
+    print("    • Check if LP has any feasible solution")
+    print("")
+
+    # Build instance for feasibility checking
+    from solvers.transport.bipartite import BipartiteTransportSolver
+    solver_instance = BipartiteTransportSolver()
+
+    # Convert extracted params to solver format
+    instance = {
+        'problem_type': 'TRANSPORTATION',
+        'solver_id': 'transport_basic_bipartite',
+        'sets': {
+            'I_plants': extracted_params.get('plants', []),
+            'J_markets': extracted_params.get('markets', [])
+        },
+        'params': {
+            'supply': extracted_params.get('capacity', {}),
+            'demand': extracted_params.get('demand', {}),
+            'cost': {(plant, market): cost
+                     for plant, markets in extracted_params.get('cost', {}).items()
+                     for market, cost in markets.items()}
+        }
+    }
+
+    # Add arc_capacity if present
+    if 'arc_capacity' in extracted_params and extracted_params['arc_capacity']:
+        instance['params']['arc_capacity'] = {
+            (plant, market): cap
+            for plant, markets in extracted_params['arc_capacity'].items()
+            for market, cap in markets.items()
+        }
+
+    # Run feasibility check
+    report = check_feasibility(instance)
+
+    print(f"\n{'='*80}")
+    print(f"  FEASIBILITY RESULT: {report.status.value}")
+    print(f"{'='*80}\n")
+
+    # Map layer numbers to descriptive names
+    layer_names = {
+        0: "Layer 1 (Structural Validation)",
+        1: "Layer 2 (Problem-Specific Conditions)",
+        2: "Layer 3 (LP Relaxation)"
+    }
+
+    print(f"Highest layer passed: {layer_names.get(report.layer_passed, f'Layer {report.layer_passed}')}")
+    print(f"\nDetails:")
+    for i, reason in enumerate(report.reasons, 1):
+        print(f"  {i}. {reason}")
+
+    # If INFEASIBLE, explain and stop
+    if report.status == FeasStatus.INFEASIBLE:
+        print_section("INFEASIBILITY EXPLANATION")
+
+        print("❌ This problem CANNOT be solved because:\n")
+
+        # Categorize by layer
+        if report.layer_passed == 0:
+            print("🔍 LAYER 1 (Structural Validation) Issues:")
+            print("   The problem has structural defects in its formulation:")
+        elif report.layer_passed == 1:
+            print("🔍 LAYER 2 (Problem-Specific Conditions) Issues:")
+            print("   The problem violates necessary conditions:")
+        else:
+            print("🔍 LAYER 3 (LP Relaxation) Issues:")
+            print("   The constraint system is infeasible:")
+
+        for reason in report.reasons:
+            print(f"   • {reason}")
+
+        print("\n💡 Suggested Fixes:")
+        if report.suggestions:
+            for suggestion in report.suggestions:
+                print(f"   • {suggestion}")
+        else:
+            # Generic suggestions based on layer
+            if report.layer_passed == 0:
+                print("   • Check that all cost matrix entries are defined")
+                print("   • Verify that plant and market names match across all parameters")
+            elif report.layer_passed == 1:
+                print("   • Increase plant capacities to meet total demand")
+                print("   • Reduce market demands to match available supply")
+                print("   • Check individual route capacity limits")
+            else:
+                print("   • Review arc capacity constraints")
+                print("   • Check if constraint pattern creates bottlenecks")
+
+        print("\n" + "="*80)
+        print("  Workflow stopped - problem is infeasible")
+        print("="*80 + "\n")
+        return
+
+    # If FEASIBLE, proceed to solve
+    print("\n✅ Problem is FEASIBLE - proceeding to solve...\n")
+
+    # Step 5: Solve the optimization problem
+    print_section("STEP 5: Solve Optimization Problem")
 
     print("Sending problem to solver...")
     result = agent.solve_natural_language(problem_description)
@@ -268,29 +431,37 @@ def main():
         if flow.get('value', 0) > 0.1:
             print(f"  {flow['plant']:12} → {flow['market']:12}: {flow['value']:6.1f} bottles")
 
-    # Step 4: Request Analysis #1 - Flow Network Visualization
-    print_section("ANALYSIS #1: Flow Network Visualization")
+    # Step 6: Request Analysis #1 - Flow Network Visualization
+    plot1_file = None
+    plot2_file = None
+    plot3_file = None
 
-    print("Creating network visualization of wine flows...")
-    fig1 = create_flow_network_plot(solution, params)
-    plot1_file = save_plot(fig1, "flow_network")
-    plt.close(fig1)
+    if generate_graphs:
+        print_section("ANALYSIS #1: Flow Network Visualization")
 
-    # Step 5: Request Analysis #2 - Cost Breakdown
-    print_section("ANALYSIS #2: Cost Breakdown by Route")
+        print("Creating network visualization of flows...")
+        fig1 = create_flow_network_plot(solution, params)
+        plot1_file = save_plot(fig1, "flow_network")
+        plt.close(fig1)
 
-    print("Analyzing cost distribution across routes...")
-    fig2 = create_cost_breakdown_plot(solution, params)
-    plot2_file = save_plot(fig2, "cost_breakdown")
-    plt.close(fig2)
+        # Step 7: Request Analysis #2 - Cost Breakdown
+        print_section("ANALYSIS #2: Cost Breakdown by Route")
 
-    # Step 6: Request Analysis #3 - Capacity Utilization
-    print_section("ANALYSIS #3: Winery Capacity Utilization")
+        print("Analyzing cost distribution across routes...")
+        fig2 = create_cost_breakdown_plot(solution, params)
+        plot2_file = save_plot(fig2, "cost_breakdown")
+        plt.close(fig2)
 
-    print("Analyzing capacity utilization at each winery...")
-    fig3 = create_capacity_utilization_plot(solution, params)
-    plot3_file = save_plot(fig3, "capacity_utilization")
-    plt.close(fig3)
+        # Step 8: Request Analysis #3 - Capacity Utilization
+        print_section("ANALYSIS #3: Winery Capacity Utilization")
+
+        print("Analyzing capacity utilization at each plant...")
+        fig3 = create_capacity_utilization_plot(solution, params)
+        plot3_file = save_plot(fig3, "capacity_utilization")
+        plt.close(fig3)
+    else:
+        print_section("GRAPHS DISABLED (--no-graphs flag)")
+        print("Skipping graph generation as requested.")
 
     # Step 7: Request Analysis #4 - Textual Sensitivity Analysis
     print_section("ANALYSIS #4: Sensitivity Analysis")
@@ -345,13 +516,17 @@ def main():
     print("Generated Artifacts:")
     print("-" * 80)
     print(f"✓ Optimization solution: €{solution.get('objective_value', 0):.2f} optimal cost")
-    print(f"✓ Plot 1: {plot1_file}")
-    print(f"✓ Plot 2: {plot2_file}")
-    print(f"✓ Plot 3: {plot3_file}")
+    if generate_graphs:
+        print(f"✓ Plot 1: {plot1_file}")
+        print(f"✓ Plot 2: {plot2_file}")
+        print(f"✓ Plot 3: {plot3_file}")
+    else:
+        print(f"  (Graphs disabled with --no-graphs flag)")
     print(f"✓ Analysis 4: Sensitivity analysis (textual)")
     print(f"✓ Analysis 5: What-if scenario (textual)")
 
-    print(f"\nAll plots saved to: {OUTPUT_DIR}/")
+    if generate_graphs:
+        print(f"\nAll plots saved to: {OUTPUT_DIR}/")
     print("\nKey Insights:")
     print("-" * 80)
 

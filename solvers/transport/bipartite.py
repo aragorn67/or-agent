@@ -123,32 +123,18 @@ class BipartiteTransportSolver(OptimizationSolver):
             "freight": 90  # $/thousand cases per thousand miles
         }
 
-    def solve(self, params: Dict[str, Any]) -> Dict[str, Any]:
+    def build_model(self, params: Dict[str, Any]):
         """
-        Build and solve the bipartite transportation model using Pyomo + GLPK.
+        Build the Pyomo model for bipartite transportation.
+
+        Separated from solve() to allow feasibility checking to reuse model structure.
 
         Args:
-            params: Problem parameters (plants, markets, capacity, demand, distance, freight)
+            params: Problem parameters (plants, markets, capacity, demand, distance/cost, freight)
 
         Returns:
-            {
-                "status": "OPTIMAL" | "INFEASIBLE" | ...,
-                "solver_id": "transport_basic_bipartite",
-                "objective": float,
-                "objective_thousand_usd": float (for backward compatibility),
-                "flows": [{"plant": str, "market": str, "value": float}, ...],
-                "kpis": {"total_by_plant": {...}, "total_by_market": {...}}
-            }
+            ConcreteModel: Pyomo model ready to solve
         """
-        # Validate
-        errors = self.validate_params(params)
-        if errors:
-            return {
-                "status": "VALIDATION_ERROR",
-                "solver_id": self.solver_id,
-                "errors": errors
-            }
-
         # Extract and normalize parameters
         plants: List[str] = [str(x) for x in params["plants"]]
         markets: List[str] = [str(x) for x in params["markets"]]
@@ -165,6 +151,11 @@ class BipartiteTransportSolver(OptimizationSolver):
             distance = self._normalize_distance(params["distance"])
             freight: float = float(params["freight"])
             use_direct_cost = False
+
+        # Handle arc capacities (if provided)
+        arc_capacity = params.get("arc_capacity", None)
+        if arc_capacity is not None:
+            arc_capacity = self._normalize_distance(arc_capacity)
 
         # Build Pyomo model
         m = ConcreteModel()
@@ -203,6 +194,45 @@ class BipartiteTransportSolver(OptimizationSolver):
         def demand_rule(m, j):
             return sum(m.x[i, j] for i in m.I) >= m.b[j]
         m.demand = Constraint(m.J, rule=demand_rule)
+
+        # Arc capacity constraints (if provided)
+        if arc_capacity is not None:
+            m.arc_cap = Param(m.I, m.J, initialize=arc_capacity, default=float('inf'))
+
+            def arc_capacity_rule(m, i, j):
+                return m.x[i, j] <= m.arc_cap[i, j]
+            m.arc_capacity_constraint = Constraint(m.I, m.J, rule=arc_capacity_rule)
+
+        return m
+
+    def solve(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Build and solve the bipartite transportation model using Pyomo + GLPK.
+
+        Args:
+            params: Problem parameters (plants, markets, capacity, demand, distance, freight)
+
+        Returns:
+            {
+                "status": "OPTIMAL" | "INFEASIBLE" | ...,
+                "solver_id": "transport_basic_bipartite",
+                "objective": float,
+                "objective_thousand_usd": float (for backward compatibility),
+                "flows": [{"plant": str, "market": str, "value": float}, ...],
+                "kpis": {"total_by_plant": {...}, "total_by_market": {...}}
+            }
+        """
+        # Validate
+        errors = self.validate_params(params)
+        if errors:
+            return {
+                "status": "VALIDATION_ERROR",
+                "solver_id": self.solver_id,
+                "errors": errors
+            }
+
+        # Build model
+        m = self.build_model(params)
 
         # Solve
         solver = SolverFactory("glpk")

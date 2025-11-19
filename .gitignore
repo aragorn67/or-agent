@@ -44,3 +44,8 @@ knowledge/vectorstore/
 ML_approaches/RAG/papers/
 ML_approaches/RAG/vectorstore/
 knowledge/
+
+# ML & RAG Archive (large files - too big for GitHub)
+ML_RAG_archive/ML_approaches/RAG/papers/*.pdf
+ML_RAG_archive/ML_approaches/RAG/vectorstore/
+ML_RAG_archive/ML_approaches/RAG/papers/
