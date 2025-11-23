@@ -9,6 +9,11 @@ Tests all three layers:
 Uses infeasible problems from or_problem_repository to test failure modes.
 """
 
+# Windows: Add project root to path so imports work when running tests directly
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import pytest
 from feasibility import check_feasibility, FeasStatus, FeasibilityReport
 from feasibility.schemas import ParsedInstance

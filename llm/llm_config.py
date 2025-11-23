@@ -1,11 +1,14 @@
 # llm/llm_config.py
 """
-Central configuration for LLM behavior across the entire system.
+LLM Behavior and Task-Specific Configuration
 
-This file defines:
-- Model defaults (model, temperature, max_tokens, json_mode, etc.)
-- Per-task overrides (classification, extraction, explanation, follow-up)
-- Stylistic/behavioral switches (concise answers, chain-of-thought, markdown formatting, etc.)
+This file defines HOW LLMs are used, not WHICH LLMs are used.
+- Which models to use is defined in config.py (CLASSIFICATION_MODEL, EXTRACTION_MODEL, REASONING_MODEL)
+- This file configures parameters and behavior for each task:
+  - Temperature, timeouts, retries, max_tokens
+  - Prompt styles (concise, detailed, chain-of-thought)
+  - JSON mode, schema enforcement, error handling
+  - Global behavioral switches (markdown, concise mode, technical depth, etc.)
 
 All LLM functions should use parameters from this configuration.
 
@@ -13,18 +16,18 @@ Usage Examples:
     # Use default configuration
     from llm.llm_config import config
 
-    # Override model
-    config.override_model_config(model="llama3:8b", temperature=0.2)
-
-    # Override specific task
+    # Override task behavior
     config.override_task_config("explanation", temperature=0.3, max_tokens=1024)
 
-    # Change behavior
-    config.override_behavior(concise_mode=False, use_emojis=True)
+    # Change global behavior
+    config.override_behavior(concise_mode=False, technical_depth="high")
 
     # Save/load configuration
     config.save_to_file("my_config.json")
     new_config = LLMConfig.load_from_file("my_config.json")
+
+NOTE: The "model" field in LLMModelConfig is for reference only.
+The actual LLM selection happens in config.py.
 """
 
 from typing import Dict, Any, Optional
@@ -34,22 +37,22 @@ from dataclasses import dataclass, field
 @dataclass
 class LLMModelConfig:
     """
-    Configuration for the base LLM model.
+    Reference configuration for LLM parameters.
 
-    These settings define the model itself and its core parameters.
-    Task-specific overrides can adjust these values per operation.
+    NOTE: This does NOT specify which LLM model to use!
+    Model selection is in config.py (CLASSIFICATION_MODEL, EXTRACTION_MODEL, REASONING_MODEL).
+    
+    This class defines runtime parameters applied to whichever model is selected:
+    - temperature: Randomness in responses (0.0 = deterministic, 1.0 = creative)
+    - top_p: Nucleus sampling parameter (0.0-1.0)
+    - repeat_penalty: Penalty for repeating tokens (1.0 = no penalty, >1.0 = discourage)
+    - max_tokens: Maximum context window size (num_ctx in Ollama)
+    - timeout: Request timeout in seconds
+    - stop_sequences: Sequences that stop generation when encountered
 
-    Attributes:
-        model: Model name/identifier (e.g., "qwen2:7b", "llama3:8b")
-        host: Ollama server URL
-        temperature: Randomness in responses (0.0 = deterministic, 1.0 = creative)
-        top_p: Nucleus sampling parameter (0.0-1.0)
-        repeat_penalty: Penalty for repeating tokens (1.0 = no penalty, >1.0 = discourage)
-        max_tokens: Maximum context window size (num_ctx in Ollama)
-        timeout: Request timeout in seconds
-        stop_sequences: Sequences that stop generation when encountered
+    These are baseline defaults; tasks can override them via task_configs.
     """
-    model: str = "deepseek-r1:latest"
+    model: str = "reference-only"  # See config.py for actual model selection
     host: str = "http://localhost:11434"
     temperature: float = 0.0  # Deterministic by default for optimization tasks
     top_p: float = 0.9
@@ -155,13 +158,15 @@ class GlobalBehaviorConfig:
 
 class LLMConfig:
     """
-    Central LLM configuration manager.
+    Central behavioral and task configuration for LLMs.
 
-    This class manages all LLM-related configuration across the system.
-    It provides:
-    - Base model configuration (applies to all tasks)
-    - Task-specific overrides (per-operation settings)
-    - Global behavior settings (affects all interactions)
+    This class manages HOW to use LLMs, not WHICH ones to use:
+    - Task-specific parameters (temperature, timeouts, retries, max_tokens)
+    - Prompt style preferences (concise, detailed, chain-of-thought)
+    - Global behavior settings (markdown, concise mode, technical depth, etc.)
+    - Error handling and response formatting
+
+    The actual LLM selection (which models to use for which tasks) is in config.py.
 
     The configuration can be:
     - Modified programmatically (override_* methods)
@@ -171,8 +176,8 @@ class LLMConfig:
     Example:
         # Create and customize config
         config = LLMConfig()
-        config.override_model_config(model="llama3:8b")
         config.override_task_config("classification", temperature=0.0, max_retries=5)
+        config.override_behavior(concise_mode=False, technical_depth="high")
 
         # Save for later
         config.save_to_file("my_config.json")
@@ -343,18 +348,23 @@ class LLMConfig:
 
     def override_model_config(self, **kwargs):
         """
-        Override model configuration parameters.
+        Override runtime parameters (NOT model selection).
+
+        NOTE: This does NOT change which LLM model is used.
+        To change models, edit config.py (CLASSIFICATION_MODEL, EXTRACTION_MODEL, REASONING_MODEL).
+
+        This method overrides runtime parameters like temperature, timeout, etc.
+        that apply to whichever model is selected in config.py.
 
         Args:
-            **kwargs: Model parameters to override (e.g., model="llama3:8b")
+            **kwargs: Parameters to override (e.g., temperature=0.1, timeout=120)
 
         Example:
-            # Switch to a different model
-            config.override_model_config(
-                model="llama3:8b",
-                host="http://localhost:11434",
-                temperature=0.1
-            )
+            # Change runtime behavior for the selected model
+            config.override_model_config(temperature=0.2, timeout=90)
+
+            # To use a DIFFERENT model, edit config.py instead:
+            # EXTRACTION_MODEL = "qwen2.5-coder:7b"  # Change in config.py
         """
         for key, value in kwargs.items():
             if hasattr(self.model_config, key):
@@ -504,7 +514,12 @@ class LLMConfig:
 # GLOBAL CONFIGURATION INSTANCE
 # ============================================================================
 # This is the default configuration used throughout the system.
-# You can modify it directly or create your own instance.
+# It manages task behavior and global settings (NOT which models to use).
+#
+# For model selection, see config.py:
+#   - CLASSIFICATION_MODEL = "qwen2.5:3b-instruct"
+#   - EXTRACTION_MODEL = "qwen2.5-coder:7b"
+#   - REASONING_MODEL = "deepseek-r1:latest"
 
 config = LLMConfig()
 

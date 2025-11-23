@@ -27,8 +27,10 @@ USAGE:
     python test_classification.py --category transportation --show-rag
 """
 
+# Windows: Add project root to path so imports work when running tests directly
 import sys
 import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from tests.or_problem_repository import (
