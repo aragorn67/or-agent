@@ -24,9 +24,13 @@ DEFAULT_SOLVER_BY_TYPE = {
     "transportation": "transport_basic_bipartite",
     "min_cost_flow": "transport_basic_bipartite",  # Fallback until we add true min-cost-flow solver
 
-    # Scheduling family
+    # Scheduling family - single stage
     "single_stage_scheduling": "single_stage_ipm_scheduling",
-    "single_machine_tardiness": "single_stage_ipm_scheduling",
+    "single_machine_makespan": "single_stage_ipm_scheduling",      # ✅ Has makespan objective
+    "parallel_machine_scheduling": "single_stage_ipm_scheduling",  # ✅ Multi-unit support
+
+    # Scheduling family - NOT solvable (missing objective functions)
+    "single_machine_tardiness": "none",  # ❌ Solver lacks tardiness objective (only has makespan/changeover)
 }
 
 # ============================================================================
@@ -36,35 +40,106 @@ SYSTEM = """You are an Operations Research problem classifier.
 
 CRITICAL RULES:
 1. Classify by STRUCTURE, not keywords.
-2. Base your reasoning on sets, decision variables (binary/integer/continuous),
-   constraints, and the objective.
-3. Prefer the problem type whose canonical mathematical formulation best matches
-   the described structure, even if the text uses misleading words.
+2. Base your reasoning on sets, decision variables, constraints, and objective.
+3. Use the canonical mathematical formulation that best matches the structure.
+4. Keywords like "transportation", "scheduling" can be misleading - verify structure!
 
-KEY DISTINCTIONS:
+═══════════════════════════════════════════════════════════════════════════════
+TRANSPORTATION vs MIN-COST FLOW
+═══════════════════════════════════════════════════════════════════════════════
 
-TRANSPORTATION vs MIN-COST FLOW:
-  * Transportation is a BIPARTITE network: flows only from supply nodes (plants,
-    warehouses, origins) to demand nodes (markets, customers, sinks).
-    There are NO intermediate/transshipment nodes.
-  * Min-cost flow uses a GENERAL NETWORK: directed arcs, possible intermediate/
-    transshipment nodes with flow conservation, sometimes arc capacities, possibly
-    multiple commodities. If the description mentions flow conservation at many
-    internal nodes, treat it as min-cost flow (even if it says "transportation").
+TRANSPORTATION (bipartite network):
+  Structure:
+    • Exactly TWO node sets: sources I and sinks J
+    • Variables: x[i,j] ≥ 0 (flow from source i to sink j)
+    • Flow ONLY from I → J (no I→I, no J→J, no intermediate nodes)
+    • Constraints: supply[i] limits and demand[j] requirements
 
-SINGLE-STAGE vs JOB-SHOP SCHEDULING:
-  * Single-stage (including single-machine or parallel-machine) scheduling:
-    each job has ONE processing step; decisions are about assignment to machines
-    and sequencing on that stage, with capacity and timing constraints.
-  * Job-shop/multi-stage scheduling:
-    each job has a SEQUENCE of operations on different machines, with
-    precedence constraints between operations and machine-specific routing.
+  MUST HAVE:
+    ✓ Two distinct sets (sources and sinks)
+    ✓ Direct shipping from sources to sinks
+    ✓ No flow conservation at intermediate nodes
 
-GENERAL GUIDELINES:
-- Ignore literal mentions like "assignment", "transportation", "scheduling" etc.
-  They can be red herrings. Use the underlying mathematical structure instead.
-- If the structure does not clearly match any known type, choose the closest one
-  and set solver_id="none".
+  MUST NOT HAVE:
+    ✗ Intermediate/transshipment nodes with flow conservation
+    ✗ "Through hubs", "via distribution centers"
+
+  Positive signals: "bipartite", "direct shipping", "no intermediate nodes"
+  Example: "3 factories ship directly to 4 customers"
+
+MIN-COST FLOW (general network):
+  Structure:
+    • General node set N (sources, sinks, AND intermediate nodes)
+    • Variables: flow[a] ≥ 0 for each arc a
+    • Flow conservation at INTERNAL nodes: in_flow = out_flow
+    • Arc capacity constraints
+
+  MUST HAVE:
+    ✓ Intermediate/transshipment nodes
+    ✓ Flow conservation equations at internal nodes
+    ✓ Network structure (not just bipartite)
+
+  MUST NOT BE:
+    ✗ Only two node sets (sources and sinks)
+
+  Positive signals: "through", "via", "hubs", "transshipment", "flow conservation"
+  Example: "depot → through 2 hubs → to hospitals"
+
+═══════════════════════════════════════════════════════════════════════════════
+SINGLE-STAGE vs JOB-SHOP SCHEDULING
+═══════════════════════════════════════════════════════════════════════════════
+
+SINGLE-STAGE SCHEDULING:
+  Structure:
+    • Each job j has ONE operation
+    • Variables: assign[j,m] ∈ {0,1}, start[j] ≥ 0
+    • Constraints: one assignment per job, no overlap, due dates
+    • May have "eligible machines" (subset of machines per job)
+
+  MUST HAVE:
+    ✓ Exactly ONE operation per job
+    ✓ Decision: which machine + when to start
+    ✓ No operation precedence/sequence
+
+  MUST NOT HAVE:
+    ✗ Multiple operations per job with sequencing
+    ✗ "First operation then second operation"
+
+  Positive signals: "one operation per job", "parallel machines", "single stage"
+  Example: "5 orders on 3 machines, each order processed once"
+
+JOB-SHOP / FLOW-SHOP (multi-stage):
+  Structure:
+    • Each job has MULTIPLE operations with precedence
+    • Variables: start[j,o] for job j, operation o
+    • Precedence: operation k+1 starts after operation k finishes
+    • Routing: different machine for each operation
+
+  MUST HAVE:
+    ✓ Multiple operations per job
+    ✓ Operation sequences with precedence
+    ✓ "Operation 1 then operation 2"
+
+  Positive signals: "operation sequence", "routing", "multi-stage", "job shop"
+  Example: "each job: M1 → M2 → M3"
+
+═══════════════════════════════════════════════════════════════════════════════
+DECISION PROCESS
+═══════════════════════════════════════════════════════════════════════════════
+
+Step 1: Count structural elements
+  - How many node types? (2 sets = bipartite, 3+ = network)
+  - How many operations per job? (1 = single-stage, 2+ = multi-stage)
+
+Step 2: Look for explicit structural hints
+  - "This is a bipartite problem" → transportation
+  - "through intermediate nodes" → min_cost_flow
+  - "one operation per job" → single_stage_scheduling
+  - "operation sequence" → job_shop
+
+Step 3: Ignore misleading keywords
+  - The word "transportation" can appear in min-cost-flow problems
+  - Focus on structure: bipartite vs network, single-stage vs multi-stage
 
 Output ONLY JSON compliant with the given schema.
 """
@@ -75,29 +150,82 @@ USER_TMPL = """Schema (for validation reference):
 Text to classify:
 \"\"\"{text}\"\"\"
 
-CLASSIFICATION CHECKLIST:
+═══════════════════════════════════════════════════════════════════════════════
+CLASSIFICATION CHECKLIST
+═══════════════════════════════════════════════════════════════════════════════
 
-For TRANSPORTATION problems, check:
-- Is it BIPARTITE (sources→destinations only)? → problem_type: "transportation", solver_id: "transport_basic_bipartite"
-- Does it have INTERMEDIATE NODES or HUBS? → problem_type: "min_cost_flow", solver_id: "none"
-- Example bipartite: "factories ship to customers", "plants supply markets"
-- Example network: "through distribution centers", "via hubs", "multi-stage"
+STEP 1: IDENTIFY NODE/JOB STRUCTURE
 
-For SCHEDULING problems, check:
-- How many PROCESSING STAGES per job?
-  * ONE stage (e.g., "process on one of several machines") → problem_type: "single_stage_scheduling", solver_id: "single_stage_ipm_scheduling"
-  * MULTIPLE stages (e.g., "operation 1 then operation 2", "machine sequence") → problem_type: "job_shop", solver_id: "none"
-- Look for: "single stage", "parallel machines", "one operation per job" → single_stage
-- Look for: "operation sequence", "routing", "multi-stage", "precedence between operations" → job_shop
+For TRANSPORTATION-like problems:
+  □ Count node types:
+    - Only sources + sinks (2 types)? → Likely TRANSPORTATION
+    - Sources + intermediate + sinks (3+ types)? → Likely MIN-COST FLOW
 
-Return fields:
+  □ Check for explicit hints:
+    - "bipartite", "direct shipping", "no intermediate"? → TRANSPORTATION
+    - "through", "via", "hubs", "flow conservation"? → MIN-COST FLOW
+
+  □ Look for transshipment:
+    - NO intermediate nodes mentioned? → TRANSPORTATION
+    - YES intermediate nodes with flow conservation? → MIN-COST FLOW
+
+  Decision:
+    → If bipartite: problem_type="transportation", solver_id="transport_basic_bipartite"
+    → If network: problem_type="min_cost_flow", solver_id="none"
+
+For SCHEDULING-like problems:
+  □ Count operations per job:
+    - Each job has ONE operation? → Likely SINGLE-STAGE
+    - Jobs have MULTIPLE operations? → Likely JOB-SHOP/FLOW-SHOP
+
+  □ Check for explicit hints:
+    - "one operation per job", "parallel machines", "single stage"? → SINGLE-STAGE
+    - "operation sequence", "multi-stage", "routing"? → JOB-SHOP
+
+  □ Look for precedence:
+    - NO "first...then", no operation sequences? → SINGLE-STAGE
+    - YES "operation 1 then operation 2"? → JOB-SHOP
+
+  Decision:
+    → If single-stage: problem_type="single_stage_scheduling", solver_id="single_stage_ipm_scheduling"
+    → If multi-stage: problem_type="job_shop" (or "flow_shop"), solver_id="none"
+
+STEP 2: EXTRACT EVIDENCE
+
+Gather direct quotes that support your classification:
+  - Structural hints (e.g., "This is a bipartite problem")
+  - Node/operation counts (e.g., "3 sources, 4 sinks", "one operation per job")
+  - Keywords (e.g., "through hubs", "operation sequence")
+
+STEP 3: ASSIGN CONFIDENCE
+
+High confidence (0.9-1.0):
+  - Text explicitly states structure ("This is a bipartite...")
+  - Clear structural signals align with one type
+  - No ambiguity
+
+Medium confidence (0.7-0.9):
+  - Structure is clear but not explicitly stated
+  - Some keywords but structure is evident
+
+Low confidence (0.5-0.7):
+  - Ambiguous wording
+  - Could be interpreted multiple ways
+
+═══════════════════════════════════════════════════════════════════════════════
+RETURN JSON WITH THESE FIELDS:
+═══════════════════════════════════════════════════════════════════════════════
+
 - problem_type: one of {enum}
-- confidence: 0..1 (epistemic confidence in your classification)
-- solver_id: which specific solver can handle this problem (one of {solver_enum})
-- signals: structural cues you detected (bipartite_structure, transshipment_nodes, num_processing_stages, operation_sequences, etc.)
-- evidence: list of short direct quotes from the text supporting your classification
-- why_short: one short sentence explaining your choice
-- objective: sense (minimize/maximize) and target (what's being optimized)
+- confidence: 0.0 to 1.0 (your epistemic confidence)
+- solver_id: one of {solver_enum}
+- signals: dict of structural cues detected
+    Example: {{"bipartite_structure": true, "num_node_types": 2, "num_ops_per_job": 1}}
+- evidence: list of short direct quotes from text
+    Example: ["no intermediate nodes", "3 sources, 4 sinks"]
+- why_short: one sentence explaining your classification
+    Example: "Bipartite with 3 sources shipping directly to 4 sinks"
+- objective: {{"sense": "minimize"/"maximize", "target": "cost"/"time"/etc}}
 """
 
 def _validate(obj: Dict[str,Any]) -> List[str]:

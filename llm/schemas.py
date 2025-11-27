@@ -9,39 +9,93 @@ Includes:
 """
 
 # ============================================================================
-# OR PROBLEM TYPES (Taxonomy)
+# OR PROBLEM TYPES (Taxonomy with Subtypes)
 # ============================================================================
+# Hierarchy: Some types are subtypes of others, both valid for classification
+# Example: "single_machine_tardiness" is a SUBTYPE of "single_stage_scheduling"
+# When both apply, prefer the more specific subtype for better precision
+#
+# Notation: [SOLVABLE] = we have a solver, [→ parent] = subtype of parent
+# ============================================================================
+
 CLASS_ENUM = [
-    # Transportation family
-    "transportation",              # Bipartite plant→market
-    "min_cost_flow",              # General network flow with transshipment
+    # ═══════════════════════════════════════════════════════════════════════
+    # TRANSPORTATION FAMILY
+    # ═══════════════════════════════════════════════════════════════════════
+    "transportation",              # [SOLVABLE] Bipartite: sources → sinks only
+    "min_cost_flow",              # Network with intermediate/transshipment nodes
+    "max_flow",                   # Network: maximize flow from source to sink
+    "shortest_path",              # Network: find minimum cost path
 
-    # Scheduling family
-    "single_stage_scheduling",     # Single processing step (solvable)
-    "single_machine_tardiness",    # Single machine with tardiness objective
-    "job_shop",                    # Multi-stage with operation sequences
-    "flow_shop",                   # Fixed machine sequence
-    "shift_rostering",             # Employee/nurse scheduling
-    "project_scheduling",          # PERT/CPM with precedence
+    # ═══════════════════════════════════════════════════════════════════════
+    # SCHEDULING FAMILY - SINGLE STAGE (one operation per job)
+    # ═══════════════════════════════════════════════════════════════════════
+    "single_stage_scheduling",     # [SOLVABLE] Generic: parallel machines, one op per job
 
-    # Assignment
-    "assignment",
+    # Subtypes of single_stage_scheduling (more specific):
+    "single_machine_tardiness",    # [SOLVABLE] [→ single_stage] One machine, minimize Σ tardiness
+    "single_machine_makespan",     # [SOLVABLE] [→ single_stage] One machine, minimize completion time
+    "parallel_machine_scheduling", # [SOLVABLE] [→ single_stage] Multiple identical machines
 
-    # Knapsack
-    "knapsack",
+    # ═══════════════════════════════════════════════════════════════════════
+    # SCHEDULING FAMILY - MULTI STAGE (multiple operations per job)
+    # ═══════════════════════════════════════════════════════════════════════
+    "job_shop",                    # Jobs with operation sequences, flexible routing
+    "flow_shop",                   # All jobs follow same machine sequence
+    "open_shop",                   # Jobs with operations, any order allowed
 
-    # Network problems
-    "shortest_path",
-    "max_flow",
+    # ═══════════════════════════════════════════════════════════════════════
+    # SCHEDULING FAMILY - OTHER
+    # ═══════════════════════════════════════════════════════════════════════
+    "shift_rostering",             # Employee/nurse shift scheduling
+    "project_scheduling",          # PERT/CPM with task precedence
+    "batch_scheduling",            # Chemical/pharma batch processing
 
-    # Location
-    "facility_location",
+    # ═══════════════════════════════════════════════════════════════════════
+    # ASSIGNMENT FAMILY
+    # ═══════════════════════════════════════════════════════════════════════
+    "assignment",                  # Generic: workers to tasks, one-to-one
+    "bipartite_matching",          # [→ assignment] Maximum matching in bipartite graph
+    "generalized_assignment",      # [→ assignment] With capacity/resource constraints
 
-    # Other
-    "set_cover",
-    "lot_sizing",
-    "portfolio",
-    "custom_review"               # Use when uncertain
+    # ═══════════════════════════════════════════════════════════════════════
+    # KNAPSACK FAMILY
+    # ═══════════════════════════════════════════════════════════════════════
+    "knapsack",                    # Generic: 0-1 or bounded knapsack
+    "zero_one_knapsack",           # [→ knapsack] Binary selection only
+    "bounded_knapsack",            # [→ knapsack] Limited quantities per item
+    "unbounded_knapsack",          # [→ knapsack] Unlimited quantities
+    "multidimensional_knapsack",   # [→ knapsack] Multiple resource constraints
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # LOCATION FAMILY
+    # ═══════════════════════════════════════════════════════════════════════
+    "facility_location",           # Generic: where to locate facilities
+    "uncapacitated_facility_location",  # [→ facility_location] No capacity limits
+    "capacitated_facility_location",    # [→ facility_location] With capacity constraints
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # VEHICLE ROUTING FAMILY
+    # ═══════════════════════════════════════════════════════════════════════
+    "vehicle_routing",             # Generic: routes for vehicles
+    "cvrp",                        # [→ vehicle_routing] Capacitated VRP
+    "vrptw",                       # [→ vehicle_routing] VRP with time windows
+    "tsp",                         # [→ vehicle_routing] Traveling salesman
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # PRODUCTION PLANNING FAMILY
+    # ═══════════════════════════════════════════════════════════════════════
+    "lot_sizing",                  # Production quantities over time periods
+    "production_planning",         # Multi-product aggregate planning
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # OTHER
+    # ═══════════════════════════════════════════════════════════════════════
+    "set_cover",                   # Cover elements with minimum cost sets
+    "bin_packing",                 # Pack items into minimum bins
+    "cutting_stock",               # Minimize waste when cutting materials
+    "portfolio",                   # Financial portfolio optimization
+    "custom_review"                # Use when structure doesn't match any type
 ]
 
 # ============================================================================
@@ -49,7 +103,7 @@ CLASS_ENUM = [
 # ============================================================================
 SOLVER_ID_ENUM = [
     "transport_basic_bipartite",       # Bipartite plant→market transportation
-    "single_stage_ipm_scheduling",     # Single-stage immediate-precedence scheduling
+    "single_stage_ipm_scheduling",     # Single-stage immediate-precedence scheduling (makespan/changeover)
     "none",                            # Problem recognized but no solver available
 ]
 
