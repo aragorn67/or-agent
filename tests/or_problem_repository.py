@@ -22,10 +22,54 @@ Each problem dict contains:
     - category: problem family (transportation, scheduling, etc.)
     - expected_type: specific problem type classifier should detect
     - text: natural language problem description
-    - metadata: units, scale, characteristics
+    - metadata: units, scale, characteristics, graph_signature
     - expected_schema: sets, params, vars, constraints (for validation)
-    - solvable: bool - can current system solve it?
+    - feasible: bool - is problem mathematically feasible (has solution)?
+    - solvable: bool - can current solvers handle it?
     - notes: testing/implementation notes
+
+PROBLEM TYPE TAXONOMY:
+
+Transportation Family:
+    - transportation (SOLVABLE via transport_basic_bipartite):
+        * Bipartite: sources I ship directly to sinks J
+        * No intermediate nodes or flow conservation
+        * Keywords: "direct shipping", "bipartite", "no intermediate"
+        * Example: european_wine_distribution
+
+    - min_cost_flow (NOT SOLVABLE - no solver yet):
+        * General network with intermediate transshipment nodes
+        * Flow conservation at internal nodes
+        * Keywords: "through hubs", "via warehouses", "transshipment"
+        * Example: vaccine_cold_chain, two_echelon_hub_network
+
+Scheduling Family:
+    - single_stage_scheduling (SOLVABLE via single_stage_ipm_scheduling):
+        * Each job has ONE operation
+        * Assign jobs to machines, no operation sequences
+        * Keywords: "one operation per job", "parallel machines"
+        * Example: chemical_batch_production, bottling_line_parallel_machines
+
+    - job_shop / flow_shop (NOT SOLVABLE - no solver yet):
+        * Each job has MULTIPLE operations with precedence
+        * Keywords: "operation sequence", "routing", "multi-stage"
+        * Example: job_shop_manufacturing, two_machine_flow_shop
+
+FEASIBLE vs SOLVABLE:
+    - feasible=True: Problem has valid mathematical solution
+    - solvable=True: We have a solver that can handle it (implies feasible=True)
+    - feasible=False: Infeasible problems (for testing feasibility checking)
+
+    Examples:
+        - european_wine_distribution: feasible=True, solvable=True (we can solve it)
+        - vaccine_cold_chain: feasible=True, solvable=False (no min-cost-flow solver)
+        - infeasible_transport_*: feasible=False, solvable=False (test cases)
+
+STATISTICS (as of 2025-11-27):
+    - Total problems: 35
+    - Feasible: 32 (27 with data, 3 infeasible test cases)
+    - Solvable: 14 (9 transport + 5 scheduling)
+    - Need solvers: 18 (including 2 min-cost-flow, 3 job-shop/flow-shop)
 """
 
 from enum import Enum
@@ -70,12 +114,14 @@ class ProblemType(Enum):
 
     # Scheduling
     SINGLE_STAGE_SCHEDULING = "single_stage_scheduling"
+    SINGLE_MACHINE_TARDINESS = "single_machine_tardiness"
+    SINGLE_MACHINE_MAKESPAN = "single_machine_makespan"
+    PARALLEL_MACHINE_SCHEDULING = "parallel_machine_scheduling"
     JOB_SHOP = "job_shop"
     FLOW_SHOP = "flow_shop"
     OPEN_SHOP = "open_shop"
     SHIFT_ROSTERING = "shift_rostering"
     PROJECT_SCHEDULING = "project_scheduling"
-    SINGLE_MACHINE_TARDINESS = "single_machine_tardiness"
 
     # Assignment
     ASSIGNMENT = "assignment"
@@ -151,6 +197,7 @@ Minimize the total transportation cost while meeting all demand.""",
                 "sum_i x[i,j] >= demand[j] for all j"
             ]
         },
+                "feasible": True,
         "solvable": True,
         "notes": "FIXED: Changed note from 'balanced' to unbalanced (Supply=2000 > Demand=1700)"
     },
@@ -160,15 +207,18 @@ Minimize the total transportation cost while meeting all demand.""",
     "name": "fresh_food_distribution",
     "category": ProblemCategory.TRANSPORTATION.value,
     "expected_type": ProblemType.TRANSPORTATION.value,
-    "text": """A national grocery chain distributes perishable goods from 3 regional warehouses 
-(London, Manchester, Bristol) to 5 city stores. Each warehouse has daily capacity (tons) and 
-each store daily demand (tons). Costs (£/ton) are known. 
-Find a transport plan minimizing total cost while meeting all store demands 
+    "text": """This is a direct bipartite transportation problem with no intermediate hubs.
+
+A national grocery chain distributes perishable goods from 3 regional warehouses
+(London, Manchester, Bristol) to 5 city stores. Each warehouse has daily capacity (tons) and
+each store daily demand (tons). Costs (£/ton) are known.
+Find a transport plan minimizing total cost while meeting all store demands
 without exceeding warehouse capacity.""",
     "metadata": {
         "units": {"cost": "GBP/ton", "capacity": "tons/day"},
         "scale": {"sources": 3, "sinks": 5},
         "balanced": True,
+        "graph_signature": "bipartite_supply_demand",
         "industry": "retail_food",
         "tags": ["perishable", "cost_min", "balanced"]
     },
@@ -182,6 +232,7 @@ without exceeding warehouse capacity.""",
             "sum_i x[i,j] = demand[j]"
         ]
     },
+        "feasible": True,
     "solvable": True,
     "notes": "Realistic perishable distribution network."
 },
@@ -191,14 +242,17 @@ without exceeding warehouse capacity.""",
     "name": "steel_supply_construction",
     "category": ProblemCategory.TRANSPORTATION.value,
     "expected_type": ProblemType.TRANSPORTATION.value,
-    "text": """Two steel mills (Sheffield, Glasgow) supply five major construction projects. 
-Each mill has weekly output limits and each project requires specified steel tonnage. 
-Transport costs (£/ton) depend on distance. 
+    "text": """This is a bipartite shipping problem: mills ship directly to construction sites with no intermediate nodes.
+
+Two steel mills (Sheffield, Glasgow) supply five major construction projects.
+Each mill has weekly output limits and each project requires specified steel tonnage.
+Transport costs (£/ton) depend on distance.
 Decide shipping quantities to minimize total cost while meeting all demands.""",
     "metadata": {
         "units": {"cost": "GBP/ton", "capacity": "tons/week"},
         "scale": {"sources": 2, "sinks": 5},
         "balanced": False,
+        "graph_signature": "bipartite_supply_demand",
         "industry": "construction_materials",
         "tags": ["heavy_industry", "unbalanced", "cost_min"]
     },
@@ -212,6 +266,7 @@ Decide shipping quantities to minimize total cost while meeting all demands.""",
             "sum_i x[i,j] >= demand[j]"
         ]
     },
+        "feasible": True,
     "solvable": True,
     "notes": "Steel logistics example; good for unbalanced transport detection."
 },
@@ -221,14 +276,18 @@ Decide shipping quantities to minimize total cost while meeting all demands.""",
     "name": "vaccine_cold_chain",
     "category": ProblemCategory.TRANSPORTATION.value,
     "expected_type": ProblemType.MIN_COST_FLOW.value,
-    "text": """A pharmaceutical company distributes temperature-sensitive vaccines from one national depot 
-to 4 hospital clusters through 2 intermediate cold hubs. 
-Hub capacities and transport costs (€/vial) are known. 
-Decide shipment quantities along each route to minimize cost 
+    "text": """This is a multi-stage network flow problem with intermediate transshipment nodes.
+
+A pharmaceutical company distributes temperature-sensitive vaccines from one national depot
+to 4 hospital clusters through 2 intermediate cold hubs.
+Hub capacities and transport costs (€/vial) are known.
+Flow must be conserved at each hub (incoming = outgoing within capacity).
+Decide shipment quantities along each route to minimize cost
 while respecting hub capacities and fulfilling hospital demand.""",
     "metadata": {
         "units": {"cost": "EUR/vial", "capacity": "vials/day"},
         "scale": {"nodes": 7, "arcs": 10},
+        "graph_signature": "directed_network_with_transshipment",
         "industry": "pharmaceutical",
         "tags": ["cold_chain", "multi_stage_transport", "min_cost_flow"]
     },
@@ -242,7 +301,8 @@ while respecting hub capacities and fulfilling hospital demand.""",
             "flow[a] <= capacity[a] for all a"
         ]
     },
-    "solvable": True,
+        "feasible": True,
+    "solvable": False,
     "notes": "Realistic multi-stage min-cost flow in pharma cold-chain logistics."
 }, 
 
@@ -252,12 +312,18 @@ while respecting hub capacities and fulfilling hospital demand.""",
         "name": "us_manufacturing_distribution",
         "category": ProblemCategory.TRANSPORTATION.value,
         "expected_type": ProblemType.TRANSPORTATION.value,
-        "text": """Sources: Seattle (capacity 350 units), Denver (capacity 200 units), and Detroit (capacity 150 units).
+        "text": """This is a direct bipartite shipping problem with no intermediate nodes or hubs.
+
+Sources: Seattle (capacity 350 units), Denver (capacity 200 units), and Detroit (capacity 150 units).
 Sinks: Chicago (demand 250 units), New York (demand 180 units), and Atlanta (demand 270 units).
+
+Goods ship directly from sources to sinks.
+
 Costs (USD per unit):
 Seattle→Chicago: 2, Seattle→New York: 4, Seattle→Atlanta: 5
 Denver→Chicago: 3, Denver→New York: 6, Denver→Atlanta: 2
 Detroit→Chicago: 5, Detroit→New York: 3, Detroit→Atlanta: 4
+
 Minimize total shipping cost.""",
         "metadata": {
             "units": {"cost": "USD/unit", "capacity": "units", "demand": "units"},
@@ -276,6 +342,7 @@ Minimize total shipping cost.""",
                 "sum_i x[i,j] = demand[j] for all j"
             ]
         },
+                "feasible": True,
         "solvable": True,
         "notes": "Perfectly balanced 3×3 transportation problem"
     },
@@ -310,8 +377,151 @@ Find the cheapest shipping plan.""",
                 "sum_i x[i,j] >= demand[j] for all j"
             ]
         },
+                "feasible": True,
         "solvable": True,
         "notes": "Unbalanced: supply 320 > demand 290"
+    },
+
+    {
+        "id": "transport/renewables/001",
+        "name": "renewable_energy_allocation",
+        "category": ProblemCategory.TRANSPORTATION.value,
+        "expected_type": ProblemType.TRANSPORTATION.value,
+        "text": """A national grid operator must allocate renewable energy from wind farms and solar parks to cities.
+
+Supply:
+- Wind Farm North: up to 120 MWh per day
+- Wind Farm Coast: up to 90 MWh per day
+- Solar Park East: up to 70 MWh per day
+
+Demand:
+- City A: requires 80 MWh per day
+- City B: requires 60 MWh per day
+- City C: requires 50 MWh per day
+- City D: requires 40 MWh per day
+
+Transmission loss (equivalent cost) in MWh per unit of energy delivered:
+- Wind Farm North → City A: 0.05, City B: 0.10, City C: 0.08, City D: 0.12
+- Wind Farm Coast → City A: 0.07, City B: 0.06, City C: 0.09, City D: 0.10
+- Solar Park East → City A: 0.09, City B: 0.08, City C: 0.04, City D: 0.06
+
+Decide how much energy to send from each renewable source to each city to minimise total effective loss, while meeting all city demands and not exceeding farm capacities.""",
+        "metadata": {
+            "units": {"energy": "MWh/day", "loss": "MWh per delivered MWh"},
+            "scale": {"sources": 3, "sinks": 4},
+            "balanced": False,  # Supply=280, Demand=230
+            "graph_signature": "bipartite_supply_demand",
+            "tags": ["loss_min", "renewables", "unbalanced"]
+        },
+        "expected_schema": {
+            "sets": ["S_sources", "C_cities"],
+            "params": ["capacity[s]", "demand[c]", "loss[s,c]"],
+            "vars": ["x[s,c] >= 0"],
+            "objective": "min sum_{s,c} loss[s,c]*x[s,c]",
+            "constraints": [
+                "sum_c x[s,c] <= capacity[s] for all s",
+                "sum_s x[s,c] >= demand[c] for all c"
+            ]
+        },
+        "feasible": True,
+        "solvable": True,
+        "notes": "Clean bipartite transportation formulated in terms of losses instead of costs; tests structure-not-keywords classification."
+    },
+
+    {
+        "id": "transport/ecommerce/001",
+        "name": "ecommerce_fulfilment_centres",
+        "category": ProblemCategory.TRANSPORTATION.value,
+        "expected_type": ProblemType.TRANSPORTATION.value,
+        "text": """An e-commerce company ships parcels from 3 fulfilment centres to 4 metro areas.
+
+Daily shipping capacity:
+- FC North: 2,000 parcels/day
+- FC South: 1,500 parcels/day
+- FC Central: 1,800 parcels/day
+
+Expected demand (parcels/day):
+- Metro West: 1,200
+- Metro East: 900
+- Metro North: 800
+- Metro South: 1,000
+
+Each centre–metro pair has an average shipping cost (€/parcel) and a service level (not explicitly modelled).
+
+The company wants to minimise total shipping cost, while guaranteeing that each metro area is fully served from some combination of centres and that no centre exceeds its capacity.
+
+Formulate and solve this as a transportation problem.""",
+        "metadata": {
+            "units": {"parcels": "parcels/day", "cost": "EUR/parcel"},
+            "scale": {"sources": 3, "sinks": 4},
+            "balanced": False,  # Supply=5300, Demand=3900
+            "graph_signature": "bipartite_supply_demand",
+            "tags": ["cost_min", "service_level", "unbalanced", "ecommerce"]
+        },
+        "expected_schema": {
+            "sets": ["F_centres", "M_metros"],
+            "params": ["capacity[f]", "demand[m]", "cost[f,m]"],
+            "vars": ["x[f,m] >= 0"],
+            "objective": "min sum_{f,m} cost[f,m]*x[f,m]",
+            "constraints": [
+                "sum_m x[f,m] <= capacity[f] for all f",
+                "sum_f x[f,m] >= demand[m] for all m"
+            ]
+        },
+        "feasible": True,
+        "solvable": True,
+        "notes": "Another pure bipartite transport; text mentions service levels but structure is clean transportation."
+    },
+
+    {
+        "id": "transport/hub_network/001",
+        "name": "two_echelon_hub_network",
+        "category": ProblemCategory.TRANSPORTATION.value,
+        "expected_type": ProblemType.MIN_COST_FLOW.value,
+        "text": """A logistics provider ships pallets from 2 plants to 3 retail regions through 2 intermediate hubs.
+
+Supply:
+- Plant P1: up to 150 pallets/day
+- Plant P2: up to 180 pallets/day
+
+Intermediate hubs:
+- Hub H1: can process at most 200 pallets/day
+- Hub H2: can process at most 180 pallets/day
+
+Demand (pallets/day):
+- Region R1: 120
+- Region R2: 110
+- Region R3: 80
+
+Arcs exist only along the following directed routes:
+- P1 → H1, P1 → H2
+- P2 → H1, P2 → H2
+- H1 → R1, H1 → R2, H1 → R3
+- H2 → R1, H2 → R2, H2 → R3
+
+Each arc has a shipping cost (€/pallet) and a capacity (pallets/day).
+Flow must be conserved at hubs (incoming pallets = outgoing pallets, within hub capacity).
+
+Decide pallet flows on each arc to meet all regional demands at minimum total cost.""",
+        "metadata": {
+            "units": {"flow": "pallets/day", "cost": "EUR/pallet", "capacity": "pallets/day"},
+            "scale": {"nodes": 7, "arcs": 10},
+            "graph_signature": "directed_network_with_transshipment",
+            "tags": ["min_cost_flow", "two_echelon", "hubs", "transshipment"]
+        },
+        "expected_schema": {
+            "sets": ["N_nodes", "A_arcs"],
+            "params": ["capacity[a]", "cost[a]", "supply[n]", "demand[n]"],
+            "vars": ["flow[a] >= 0"],
+            "objective": "min sum_a cost[a]*flow[a]",
+            "constraints": [
+                "flow_conservation[n] for all nodes n",
+                "flow[a] <= capacity[a] for all a"
+            ]
+        },
+        "feasible": True,
+        "solvable": False,
+        "notes": "Structurally min-cost flow: explicit transshipment nodes (hubs) and network flow conservation. Should NOT be classified as 'transportation'."
     },
 
     {
@@ -357,6 +567,7 @@ Find a minimum-cost shipping plan that satisfies all warehouse demand without ex
                 "sum_i x[i,j] >= demand[j] for all j"
             ]
         },
+                "feasible": False,
         "solvable": False,
         "notes": "LAYER 0: Structurally inconsistent description: 2 factories × 3 warehouses but only 2×2 costs given. A good structural check should flag dimension mismatch / missing cost entries before building the model."
     },
@@ -404,6 +615,7 @@ Determine the shipping quantities from each plant to each centre to minimise tot
                 "sum_i x[i,j] >= demand[j] for all j"
             ]
         },
+                "feasible": False,
         "solvable": False,
         "notes": "LAYER 1: Analytic infeasibility: total supply (40+30=70) is strictly less than total demand (35+25+20=80). A problem-specific aggregate check on supply vs demand should reject this before calling the solver."
     },
@@ -463,6 +675,7 @@ Find a shipping plan that meets all assembly plant demands without exceeding fac
                 "x[i,j] <= arc_capacity[i,j] for all i,j"
             ]
         },
+                "feasible": False,
         "solvable": False,
         "notes": (
             "LAYER 2: Feasible in aggregates and simple checks but infeasible under full capacity "
@@ -487,11 +700,16 @@ SCHEDULING_PROBLEMS = [
         "name": "chemical_batch_production",
         "category": ProblemCategory.SCHEDULING.value,
         "expected_type": ProblemType.SINGLE_STAGE_SCHEDULING.value,
-        "text": """A chemical plant needs to schedule 3 production orders on 2 batch reactors.
+        "text": """This is a single-stage scheduling problem: each order has exactly ONE operation.
+
+A chemical plant needs to schedule 3 production orders on 2 batch reactors.
+
 Orders and processing requirements:
 - Order A: 2 hours on Reactor 1 OR 3 hours on Reactor 2, due by hour 10
 - Order B: 1.5 hours on Reactor 1 only, due by hour 8
 - Order C: 2.5 hours on Reactor 2 only, due by hour 12
+
+Each order is processed once on one reactor (no operation sequences).
 
 Changeover times between orders on the same reactor:
 Reactor 1: A→B takes 0.5 hours, B→A takes 0.5 hours
@@ -515,6 +733,7 @@ Minimize the total makespan while meeting all due dates.""",
                 "no_overlap[u] for all u"
             ]
         },
+                "feasible": True,
         "solvable": True,
         "notes": "CLARIFIED: Each order goes to ONE reactor (single operation). 'OR' makes it clear."
     },
@@ -523,10 +742,10 @@ Minimize the total makespan while meeting all due dates.""",
     "id": "sched/ecommerce/001",
     "name": "warehouse_order_picking",
     "category": ProblemCategory.SCHEDULING.value,
-    "expected_type": ProblemType.SINGLE_STAGE_SCHEDULING.value,
-    "text": """An e-commerce warehouse operates one picking line that can process one batch at a time. 
-10 orders must be processed with known picking times and shipping deadlines. 
-Each order's lateness incurs penalty cost (£/min). 
+    "expected_type": "single_machine_tardiness",  # More specific than single_stage_scheduling
+    "text": """An e-commerce warehouse operates one picking line that can process one batch at a time.
+10 orders must be processed with known picking times and shipping deadlines.
+Each order's lateness incurs penalty cost (£/min).
 Decide the order sequence to minimize total weighted tardiness.""",
     "metadata": {
         "units": {"time": "minutes"},
@@ -546,17 +765,18 @@ Decide the order sequence to minimize total weighted tardiness.""",
             "all_different(sequence)"
         ]
     },
-    "solvable": True,
-    "notes": "Weighted tardiness scheduling from online-retail fulfilment."
+    "feasible": True,
+    "solvable": False,  # Solver lacks tardiness objective (only has makespan/changeover)
+    "notes": "Weighted tardiness scheduling from online-retail fulfilment. NOT SOLVABLE: single_stage_ipm solver lacks weighted tardiness objective."
 }, 
 
 {
     "id": "sched/semiconductor/001",
     "name": "wafer_processing_single_stage",
     "category": ProblemCategory.SCHEDULING.value,
-    "expected_type": ProblemType.SINGLE_STAGE_SCHEDULING.value,
-    "text": """A semiconductor fab schedules 6 wafer lots on a single photolithography machine. 
-Each lot requires a setup time dependent on the previous lot's photoresist type. 
+    "expected_type": "single_machine_makespan",  # More specific: single machine with makespan objective
+    "text": """A semiconductor fab schedules 6 wafer lots on a single photolithography machine.
+Each lot requires a setup time dependent on the previous lot's photoresist type.
 The goal is to minimize total completion time (makespan).""",
     "metadata": {
         "units": {"time": "hours"},
@@ -575,17 +795,18 @@ The goal is to minimize total completion time (makespan).""",
             "all_different(sequence)"
         ]
     },
-    "solvable": True,
-    "notes": "Real industrial scheduling with setup-time dependency."
+    "feasible": True,
+    "solvable": True,  # ✅ Solver has makespan objective
+    "notes": "Real industrial scheduling with setup-time dependency. SOLVABLE: single_stage_ipm solver supports makespan objective."
 },
 
 {
     "id": "sched/pharma_packaging/001",
     "name": "pharmaceutical_packaging_line",
     "category": ProblemCategory.SCHEDULING.value,
-    "expected_type": ProblemType.SINGLE_STAGE_SCHEDULING.value,
-    "text": """A drug manufacturer packages 8 different medicines on one automated line. 
-Each product requires a fixed processing time and must finish before its delivery due time. 
+    "expected_type": "single_machine_tardiness",  # Lateness/tardiness are related concepts
+    "text": """A drug manufacturer packages 8 different medicines on one automated line.
+Each product requires a fixed processing time and must finish before its delivery due time.
 The objective is to minimize the maximum lateness (Lmax).""",
     "metadata": {
         "units": {"time": "minutes"},
@@ -604,9 +825,95 @@ The objective is to minimize the maximum lateness (Lmax).""",
             "all_different(sequence)"
         ]
     },
-    "solvable": True,
-    "notes": "Classic single-machine Lmax problem in pharma packaging operations."
+    "feasible": True,
+    "solvable": False,  # Solver lacks Lmax objective (only has makespan/changeover)
+    "notes": "Classic single-machine Lmax problem in pharma packaging operations. NOT SOLVABLE: single_stage_ipm solver lacks maximum lateness objective."
 },
+
+    {
+        "id": "sched/packaging/001",
+        "name": "bottling_line_parallel_machines",
+        "category": ProblemCategory.SCHEDULING.value,
+        "expected_type": "parallel_machine_scheduling",  # More specific: parallel machines with makespan
+        "text": """This is a parallel machine scheduling problem with 3 identical machines.
+
+A beverage company must schedule 5 bottling orders on 3 identical filling lines.
+
+Orders:
+- Order A: processing time 3 hours on any line, due by hour 12
+- Order B: processing time 4 hours on any line, due by hour 10
+- Order C: processing time 2 hours on any line, due by hour 8
+- Order D: processing time 5 hours on any line, due by hour 16
+- Order E: processing time 3 hours on any line, due by hour 14
+
+All orders require exactly one processing operation on exactly one line (no further stages).
+Lines can process at most one order at a time.
+
+There are small sequence-dependent changeover times between orders on the same line (e.g. switching flavour requires rinsing), but routing is trivial: each order only visits one line.
+
+Decide assignment of orders to lines and the processing sequence on each line to minimise the maximum completion time (makespan).""",
+        "metadata": {
+            "units": {"time": "hours"},
+            "scale": {"jobs": 5, "machines": 3},
+            "characteristics": ["single_stage", "parallel_machines", "changeovers_optional"],
+            "tags": ["makespan_min", "single_operation_per_job"]
+        },
+        "expected_schema": {
+            "sets": ["J_jobs", "M_machines"],
+            "params": ["proc_time[j]", "due[j]"],
+            "vars": ["assign[j,m] in {0,1}", "start[j] >= 0", "completion[j] >= 0"],
+            "objective": "min max_j completion[j]",
+            "constraints": [
+                "sum_m assign[j,m] = 1 for all j",
+                "no_overlap_per_machine[m] for all m",
+                "completion[j] >= start[j] + proc_time[j] for all j"
+            ]
+        },
+        "feasible": True,
+        "solvable": True,
+        "notes": "Pure single-stage parallel-machine scheduling; should map to single_stage_ipm_scheduling solver."
+    },
+
+    {
+        "id": "sched/flowshop/001",
+        "name": "two_machine_flow_shop",
+        "category": ProblemCategory.SCHEDULING.value,
+        "expected_type": ProblemType.FLOW_SHOP.value,
+        "text": """A small factory processes 4 jobs through 2 machines in the same fixed sequence (flow shop).
+
+Processing times (hours):
+Job 1: M1 = 2, M2 = 3
+Job 2: M1 = 4, M2 = 1
+Job 3: M1 = 3, M2 = 2
+Job 4: M1 = 1, M2 = 4
+
+Each job must be processed on M1 before it starts on M2.
+Machines can handle at most one job at a time.
+No preemption is allowed.
+
+Decide the processing sequence of the jobs (same order on both machines) to minimise the total makespan.""",
+        "metadata": {
+            "units": {"time": "hours"},
+            "scale": {"jobs": 4, "machines": 2},
+            "characteristics": ["multi_stage", "flow_shop", "two_machine"],
+            "tags": ["makespan_min", "fixed_machine_order"]
+        },
+        "expected_schema": {
+            "sets": ["J_jobs", "M_machines"],
+            "params": ["proc_time[j,m]"],
+            "vars": ["sequence[j] in {1..n}", "start[j,m] >= 0", "completion[j,m] >= 0"],
+            "objective": "min max_j completion[j,2]",
+            "constraints": [
+                "completion[j,1] >= start[j,1] + proc_time[j,1] for all j",
+                "completion[j,2] >= max(completion[j,1], start[j,2]) + proc_time[j,2]",
+                "no_overlap_on_each_machine",
+                "all_different(sequence)"
+            ]
+        },
+        "feasible": True,
+        "solvable": False,
+        "notes": "Textbook two-machine flow shop; should be classified as flow_shop and mapped to solver_id='none'."
+    },
 
 
     {
@@ -645,6 +952,7 @@ Minimize total completion time.""",
                 "operations_precedence_flexible for all o"
             ]
         },
+                "feasible": True,
         "solvable": False,
         "notes": "FIXED: Changed from single_stage to open_shop (multiple operations, flexible order)"
     },
@@ -678,6 +986,7 @@ Minimize total makespan.""",
                 "precedence[j] follows route[j] for all j"
             ]
         },
+                "feasible": True,
         "solvable": False,
         "notes": "Multi-stage with precedence - NOT solvable by current system"
     },
@@ -712,6 +1021,7 @@ Minimize schedule cost while meeting coverage requirements.""",
                 "no_consecutive_nights for all n"
             ]
         },
+                "feasible": True,
         "solvable": False,
         "notes": "Employee scheduling - NOT solvable by current system"
     },
@@ -748,6 +1058,7 @@ Minimize sum of T_j (total tardiness).""",
                 "all_different(sequence)"
             ]
         },
+                "feasible": True,
         "solvable": False,
         "notes": "Classic 1||∑T_j problem for testing classification"
     },
@@ -788,6 +1099,7 @@ Minimize total time required.""",
                 "sum_w x[w,t] = 1 for all t"
             ]
         },
+                "feasible": True,
         "solvable": False,
         "notes": "Classic assignment problem - solver not yet implemented"
     },
@@ -823,6 +1135,7 @@ Maximize total monthly revenue.""",
                 "sum_s x[s,t] = 1 for all t"
             ]
         },
+                "feasible": True,
         "solvable": False,
         "notes": "Maximization assignment - solver not yet implemented"
     },
@@ -863,6 +1176,7 @@ Maximize total expected return within budget.""",
                 "sum_p cost[p]*select[p] <= budget"
             ]
         },
+                "feasible": True,
         "solvable": False,
         "notes": "0/1 knapsack - solver not yet implemented"
     },
@@ -897,6 +1211,7 @@ Maximize total cargo value without exceeding capacity.""",
                 "sum_i weight[i]*select[i] <= capacity"
             ]
         },
+                "feasible": True,
         "solvable": False,
         "notes": "Weight-constrained knapsack"
     },
@@ -940,6 +1255,7 @@ What is the maximum oil flow (barrels/hour) from S to T?""",
                 "flow_conservation at all nodes except source and sink"
             ]
         },
+                "feasible": True,
         "solvable": False,
         "notes": "Max flow problem - solver not yet implemented"
     },
@@ -976,6 +1292,7 @@ What is the shortest path from Warehouse to Customer?""",
                 "flow_conservation: path from source to sink"
             ]
         },
+                "feasible": True,
         "solvable": False,
         "notes": "Shortest path - solver not yet implemented"
     },
@@ -1018,6 +1335,7 @@ Minimize total production + holding + setup costs.""",
                 "inventory[0] = 0"
             ]
         },
+                "feasible": True,
         "solvable": False,
         "notes": "Multi-period production planning - solver not yet implemented"
     },
@@ -1059,6 +1377,7 @@ Minimize total production + overtime + inventory costs.""",
                 "inventory_balance[p,t] for all p,t"
             ]
         },
+                "feasible": True,
         "solvable": False,
         "notes": "Multi-product aggregate planning - solver not yet implemented"
     },
@@ -1104,6 +1423,7 @@ Minimize total opening cost + shipping cost.""",
                 "serve[f,c] <= M*open[f] for all f,c"
             ]
         },
+                "feasible": True,
         "solvable": False,
         "notes": "Baseline UFL for classification testing"
     },
@@ -1149,6 +1469,7 @@ Minimize total distance traveled.""",
                 "subtour_elimination"
             ]
         },
+                "feasible": True,
         "solvable": False,
         "notes": "Capacity only; good for label check"
     },
@@ -1190,6 +1511,7 @@ Minimize number of sensors used.""",
                 "sum_{s: z in covers[s]} use[s] >= 1 for all z"
             ]
         },
+                "feasible": True,
         "solvable": False,
         "notes": "Binary cover model"
     },
@@ -1228,6 +1550,7 @@ Minimize number of bins used.""",
                 "sum_i size[i]*assign[i,b] <= capacity*use_bin[b] for all b"
             ]
         },
+                "feasible": True,
         "solvable": False,
         "notes": "1D bin packing - column generation candidate"
     },
@@ -1270,6 +1593,7 @@ Minimize total flow cost (cost=1 per unit per arc) subject to shared arc capacit
                 "flow_conservation[k,n] for all k,n"
             ]
         },
+                "feasible": True,
         "solvable": False,
         "notes": "Multicommodity flow - shared arc capacities"
     },

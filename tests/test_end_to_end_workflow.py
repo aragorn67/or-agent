@@ -23,7 +23,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from llm.enhanced_client import EnhancedLLMClient
 from agent.core import OptimizationAgent
-from tests.or_problem_repository import get_problem_by_name
+from tests.or_problem_repository import get_problem_by_name, get_problem_by_id, get_all_problems
 from config import Config
 from feasibility import check_feasibility, FeasStatus
 import matplotlib.pyplot as plt
@@ -211,7 +211,7 @@ def main():
 
     # Parse command-line arguments
     problem_name = "european_wine_distribution"  # Default
-    generate_graphs = True  # Default
+    generate_graphs = False  # Default: no graphs
 
     if len(sys.argv) > 1:
         for arg in sys.argv[1:]:
@@ -226,13 +226,14 @@ def main():
     print_section("STEP 1: Define Optimization Problem")
 
     # Get problem from centralized repository
-    problem = get_problem_by_name(problem_name)
+    # Try by ID first (e.g., transport/wine_eu/001), then by name
+    problem = get_problem_by_id(problem_name) or get_problem_by_name(problem_name)
     if not problem:
         print(f"✗ Error: Problem '{problem_name}' not found in repository")
         print("\nAvailable problems:")
-        from tests.or_problem_repository import REPOSITORY
-        for p_name in REPOSITORY.keys():
-            print(f"  - {p_name}")
+        all_probs = get_all_problems()
+        for p in all_probs:
+            print(f"  - {p['id']}")
         return
 
     problem_description = problem["text"]
@@ -267,7 +268,14 @@ def main():
     classifier = ProblemClassifier(ollama)
     classification, votes = classifier.classify(problem_description)
 
-    print(f"✓ Problem type: {classification.get('problem_type', 'UNKNOWN')}")
+    expected_type = problem.get('expected_type', 'UNKNOWN')
+    classified_type = classification.get('problem_type', 'UNKNOWN')
+
+    if expected_type == classified_type:
+        print(f"✓ Problem type: {classified_type} ✅ CORRECT")
+    else:
+        print(f"✗ Problem type: {classified_type} ❌ WRONG (expected: {expected_type})")
+
     print(f"  Confidence: {classification.get('confidence', 0):.2f}")
     print(f"  Solver: {classification.get('solver_id', 'UNKNOWN')}")
 
