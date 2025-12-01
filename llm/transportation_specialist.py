@@ -48,15 +48,15 @@ Extract parameters for a Transportation LP. Output STRICT JSON with keys:{rag_co
 EXTRACTION RULES:
 1. Use ONLY entities & numbers explicitly mentioned in the text
 2. Look for various phrasings: "factories/plants/warehouses" = plants, "customers/markets/cities" = markets
-3. Extract ALL capacity values mentioned (e.g., "Seattle can produce 350 units")
+3. Extract ALL capacity values mentioned (e.g., "Seattle can produce 350 units") - **EXTRACT EVEN IF NEGATIVE OR INVALID**
 4. Extract ALL demand values mentioned (e.g., "Chicago needs 300 units")
 5. Extract distance/cost information - convert to per-unit shipping costs
 6. If freight rate given (e.g., "$90 per unit per 1000 miles"), combine with distances
 7. **IMPORTANT: Extract arc_capacity if problem mentions "maximum shipping capacity", "lane capacity", "route limits", or "from X to Y: max N units"**
 8. **CRITICAL: When extracting arc_capacity, include ALL routes mentioned, even if capacity is 0! A capacity of 0 means that route is blocked. Missing entries will be treated as infinite capacity!**
 9. **If cost values are not specified or text says "values not important", use $1 per unit for all routes**
-9. If ANY required piece (except cost) is missing, return: {{"error": "<specific missing information>"}}
-10. All numbers must be numeric types, not strings
+10. **CRITICAL: ALWAYS extract all available data. If something looks wrong (negative capacity, missing data), extract what you can AND add an "error" field describing the issue. DO NOT return error-only JSON**
+11. All numbers must be numeric types, not strings
 """
 
         user = f"TRANSPORTATION PROBLEM:\n{description}\n\nReturn ONLY the JSON."
@@ -71,7 +71,9 @@ EXTRACTION RULES:
             # Deep validation for transportation
             validation_error = self._validate_transportation_deep(description, result)
             if validation_error:
-                return {"error": validation_error}
+                # Return params WITH error flag (don't throw away extracted data)
+                result["error"] = validation_error
+                return result
 
             return result
 
@@ -132,12 +134,16 @@ EXTRACTION RULES:
 
         # Numerical validation
         for plant, cap in capacity.items():
-            if not isinstance(cap, (int, float)) or cap < 0:
-                return f"Plant '{plant}' capacity must be a non-negative number, got: {cap}"
+            if not isinstance(cap, (int, float)):
+                return f"Plant '{plant}' capacity must be a number, got: {type(cap).__name__}"
+            if cap < 0:
+                return f"Factory {plant} has a negative capacity of {cap} tons"
 
         for market, dem in demand.items():
-            if not isinstance(dem, (int, float)) or dem < 0:
-                return f"Market '{market}' demand must be a non-negative number, got: {dem}"
+            if not isinstance(dem, (int, float)):
+                return f"Market '{market}' demand must be a number, got: {type(dem).__name__}"
+            if dem < 0:
+                return f"Market '{market}' has a negative demand of {dem}"
 
         for plant in plants:
             for market in markets:

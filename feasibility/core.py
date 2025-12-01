@@ -57,41 +57,48 @@ def check_feasibility(instance) -> FeasibilityReport:
         >>> if report.status == FeasStatus.INFEASIBLE:
         ...     print("Problem is infeasible:", report.reasons)
     """
-    from .structural import structural_checks
+    from .structural import structural_checks, generate_structural_suggestions
     from .problem_specific import problem_specific_checks
+    from .solver_based import solver_feasibility_check, generate_solver_suggestions
 
     reasons = []
 
     # Layer 0: Structural checks
     ok0, msg0 = structural_checks(instance)
     if not ok0:
+        suggestions = generate_structural_suggestions(instance, msg0)
         return FeasibilityReport(
             status=FeasStatus.INFEASIBLE,
             reasons=msg0,
-            layer_passed=0
+            layer_passed=0,
+            suggestions=suggestions
         )
     reasons.extend(msg0)
 
     # Layer 1: Problem-specific necessary conditions
     ok1, msg1 = problem_specific_checks(instance)
     if not ok1:
+        # Generate problem-specific suggestions
+        from .problem_specific.transport import generate_transport_suggestions
+        suggestions = generate_transport_suggestions(instance, msg1)
         return FeasibilityReport(
             status=FeasStatus.INFEASIBLE,
             reasons=reasons + msg1,
-            layer_passed=1
+            layer_passed=1,
+            suggestions=suggestions
         )
     reasons.extend(msg1)
 
     # Layer 2: Solver-based feasibility (LP relaxation + slacks)
-    from .solver_based import solver_feasibility_check
-
     status2, details2 = solver_feasibility_check(instance)
 
     if status2 == "INFEASIBLE":
+        suggestions = generate_solver_suggestions(instance, details2)
         return FeasibilityReport(
             status=FeasStatus.INFEASIBLE,
             reasons=reasons + [f"Solver-based check failed: {details2.get('reason', 'LP relaxation infeasible')}"],
-            layer_passed=2
+            layer_passed=2,
+            suggestions=suggestions
         )
     elif status2 == "UNKNOWN":
         # Layer 2 inconclusive, but Layers 0 and 1 passed

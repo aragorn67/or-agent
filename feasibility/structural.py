@@ -222,3 +222,110 @@ def structural_checks(instance) -> tuple[bool, list[str]]:
         reasons.extend(msgs)
 
     return True, reasons
+
+
+def generate_structural_suggestions(instance, error_messages: list[str]) -> list[str]:
+    """
+    Generate actionable suggestions based on structural errors.
+
+    Args:
+        instance: The problem instance
+        error_messages: Error messages from structural_checks
+
+    Returns:
+        List of actionable suggestions for the user
+    """
+    suggestions = []
+
+    for error_msg in error_messages:
+        # Empty set errors
+        if "is empty" in error_msg:
+            set_name = error_msg.split("'")[1] if "'" in error_msg else "unknown"
+            suggestions.append(
+                f"Add at least one element to set '{set_name}'. "
+                f"For example, if this is a source/factory set, provide at least one factory name."
+            )
+
+        # Dimension mismatch errors (missing cost entries)
+        elif "Cost matrix dimension mismatch" in error_msg and "Missing cost entries" in error_msg:
+            # Extract missing keys from error message
+            sets = instance.sets if hasattr(instance, 'sets') else instance.get('sets', {})
+            params = instance.params if hasattr(instance, 'params') else instance.get('params', {})
+
+            # Find source and sink sets
+            source_set_name = None
+            sink_set_name = None
+            for name in ['I', 'I_sources', 'I_plants', 'I_factories']:
+                if name in sets:
+                    source_set_name = name
+                    break
+            for name in ['J', 'J_sinks', 'J_markets', 'J_warehouses']:
+                if name in sets:
+                    sink_set_name = name
+                    break
+
+            if source_set_name and sink_set_name:
+                sources = sets[source_set_name]
+                sinks = sets[sink_set_name]
+                cost_matrix = params.get('cost', {})
+
+                missing_keys = {(i, j) for i in sources for j in sinks} - set(cost_matrix.keys())
+
+                if missing_keys:
+                    sample = list(missing_keys)[:3]
+                    suggestions.append(
+                        f"Add missing cost entries for all source-sink pairs. "
+                        f"For example, add costs for: {', '.join([f'{i}→{j}' for i, j in sample])}"
+                    )
+
+                    # Be more specific about what to add
+                    for src, snk in sample:
+                        suggestions.append(
+                            f"Specify the cost from '{src}' to '{snk}' "
+                            f"(e.g., 'the shipping cost from {src} to {snk} is 10 dollars')"
+                        )
+
+        # Invalid index errors
+        elif "has invalid index" in error_msg:
+            param_name = error_msg.split("'")[1] if "'" in error_msg else "unknown"
+            suggestions.append(
+                f"Fix the indices for parameter '{param_name}'. "
+                f"Ensure all indices are valid strings or numbers (not None or empty)."
+            )
+
+        # Invalid number errors (NaN, Inf)
+        elif "has invalid value" in error_msg and "Must be a finite number" in error_msg:
+            # Extract parameter name
+            if "[" in error_msg:
+                param_part = error_msg.split("'")[1]
+                suggestions.append(
+                    f"Replace the invalid value in '{param_part}' with a valid finite number. "
+                    f"Check that all costs, capacities, and demands are properly specified."
+                )
+            else:
+                suggestions.append(
+                    f"Ensure all numeric values are finite numbers (not NaN or infinity)."
+                )
+
+        # Negative value errors
+        elif "is negative" in error_msg and "must be non-negative" in error_msg:
+            # Extract parameter name and value
+            if "[" in error_msg:
+                param_part = error_msg.split("'")[1]
+                suggestions.append(
+                    f"Change the negative value in '{param_part}' to a non-negative number. "
+                    f"Capacities, demands, costs, and processing times cannot be negative."
+                )
+            else:
+                suggestions.append(
+                    f"Replace negative values with non-negative numbers (0 or positive)."
+                )
+
+    # If no specific suggestions were generated, provide a general one
+    if not suggestions:
+        suggestions.append(
+            "Fix the structural issues mentioned above. "
+            "Ensure all sets are non-empty, all parameters have valid indices and values."
+        )
+
+    return suggestions

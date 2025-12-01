@@ -204,3 +204,130 @@ def transport_checks(instance) -> tuple[bool, list[str]]:
         reasons.extend(msgs)
 
     return True, reasons
+
+
+def generate_transport_suggestions(instance, error_messages: list[str]) -> list[str]:
+    """
+    Generate actionable suggestions based on transportation-specific errors.
+
+    Args:
+        instance: The problem instance
+        error_messages: Error messages from transport_checks
+
+    Returns:
+        List of actionable suggestions for the user
+    """
+    suggestions = []
+    params = instance.params if hasattr(instance, 'params') else instance.get('params', {})
+    sets = instance.sets if hasattr(instance, 'sets') else instance.get('sets', {})
+
+    for error_msg in error_messages:
+        # Supply/demand balance errors
+        if "Total supply" in error_msg and "less than total demand" in error_msg:
+            # Extract values from error message
+            supply = params.get('supply', params.get('capacity', {}))
+            demand = params.get('demand', {})
+
+            total_supply = sum(supply.values())
+            total_demand = sum(demand.values())
+            shortfall = total_demand - total_supply
+
+            suggestions.append(
+                f"You need to increase supply by at least {shortfall:.2f} units OR reduce demand by at least {shortfall:.2f} units."
+            )
+
+            # Suggest specific sources to increase
+            if supply:
+                # Find sources with room to expand
+                sorted_sources = sorted(supply.items(), key=lambda x: x[1], reverse=True)
+                top_source = sorted_sources[0]
+                suggestions.append(
+                    f"Option 1: Increase capacity of source '{top_source[0]}' from {top_source[1]:.2f} to {top_source[1] + shortfall:.2f}"
+                )
+
+            # Suggest specific sinks to reduce
+            if demand:
+                sorted_sinks = sorted(demand.items(), key=lambda x: x[1], reverse=True)
+                top_sink = sorted_sinks[0]
+                suggestions.append(
+                    f"Option 2: Reduce demand of sink '{top_sink[0]}' from {top_sink[1]:.2f} to {top_sink[1] - shortfall:.2f}"
+                )
+
+            # Suggest distributing the increase
+            if len(supply) > 1:
+                per_source = shortfall / len(supply)
+                suggestions.append(
+                    f"Option 3: Distribute the shortfall evenly across all sources (add {per_source:.2f} to each)"
+                )
+
+        # Sink reachability errors
+        elif "cannot be reached" in error_msg:
+            # Extract unreachable sinks
+            unreachable_sinks = []
+            if "[" in error_msg and "]" in error_msg:
+                sinks_str = error_msg[error_msg.find("[")+1:error_msg.find("]")]
+                unreachable_sinks = [s.strip().strip("'\"") for s in sinks_str.split(",")]
+
+            if unreachable_sinks:
+                for sink in unreachable_sinks:
+                    suggestions.append(
+                        f"Add at least one route to sink '{sink}'. "
+                        f"Specify a cost from any source to '{sink}' "
+                        f"(e.g., 'the cost from FactoryA to {sink} is 20')"
+                    )
+
+                    # If arc capacities exist, also suggest capacity
+                    if params.get('arc_capacity') is not None:
+                        demand_val = params.get('demand', {}).get(sink, 0)
+                        suggestions.append(
+                            f"If using arc capacities, ensure the route to '{sink}' has capacity >= {demand_val:.2f}"
+                        )
+
+        # Individual sink capacity errors
+        elif "cannot receive enough flow due to arc capacity" in error_msg:
+            # Parse details from error message
+            arc_capacity = params.get('arc_capacity', {})
+            demand = params.get('demand', {})
+
+            # Find sources and sinks
+            sources = None
+            sinks = None
+            for name in ['I', 'I_sources', 'I_plants', 'I_factories']:
+                if name in sets:
+                    sources = sets[name]
+                    break
+            for name in ['J', 'J_sinks', 'J_markets', 'J_warehouses']:
+                if name in sets:
+                    sinks = sets[name]
+                    break
+
+            if sources and sinks:
+                # Re-run the check to get specific sinks with issues
+                for sink in sinks:
+                    total_incoming_capacity = sum(arc_capacity.get((src, sink), 0) for src in sources)
+                    sink_demand = demand.get(sink, 0)
+
+                    if total_incoming_capacity < sink_demand - 1e-6:
+                        shortfall = sink_demand - total_incoming_capacity
+                        suggestions.append(
+                            f"Sink '{sink}' needs {sink_demand:.2f} but can only receive {total_incoming_capacity:.2f}. "
+                            f"Increase arc capacities to '{sink}' by at least {shortfall:.2f} total."
+                        )
+
+                        # Suggest specific arcs to increase
+                        existing_arcs = [(src, arc_capacity.get((src, sink), 0)) for src in sources if (src, sink) in arc_capacity]
+                        if existing_arcs:
+                            # Suggest increasing the largest arc
+                            largest_arc = max(existing_arcs, key=lambda x: x[1])
+                            suggestions.append(
+                                f"  → Increase capacity of route '{largest_arc[0]}→{sink}' from {largest_arc[1]:.2f} to {largest_arc[1] + shortfall:.2f}"
+                            )
+
+    # If no specific suggestions were generated, provide a general one
+    if not suggestions:
+        suggestions.append(
+            "Fix the capacity or connectivity issues mentioned above. "
+            "Ensure sufficient supply/demand balance and all destinations are reachable."
+        )
+
+    return suggestions

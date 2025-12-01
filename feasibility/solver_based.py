@@ -210,3 +210,120 @@ def _convert_instance_to_params(instance):
         return result
 
     return params
+
+
+def generate_solver_suggestions(instance, solver_result: dict) -> list[str]:
+    """
+    Generate actionable suggestions based on solver-based infeasibility.
+
+    Layer 2 infeasibility means the constraint pattern is unsatisfiable,
+    even though individual checks (Layer 0, 1) passed.
+
+    Args:
+        instance: The problem instance
+        solver_result: Details from solver_feasibility_check
+
+    Returns:
+        List of actionable suggestions for the user
+    """
+    suggestions = []
+    params = instance.params if hasattr(instance, 'params') else instance.get('params', {})
+    sets = instance.sets if hasattr(instance, 'sets') else instance.get('sets', {})
+
+    # Check if arc capacities are involved (common cause of Layer 2 infeasibility)
+    has_arc_capacity = 'arc_capacity' in params
+
+    if has_arc_capacity:
+        arc_capacity = params['arc_capacity']
+        demand = params.get('demand', {})
+        supply = params.get('supply', params.get('capacity', {}))
+
+        suggestions.append(
+            "The problem passed supply/demand balance checks but the arc capacity constraints "
+            "create an infeasible pattern. This means the specific routing constraints cannot all be satisfied simultaneously."
+        )
+
+        # Find potential bottlenecks
+        sources = None
+        sinks = None
+        for name in ['I', 'I_sources', 'I_plants', 'I_factories']:
+            if name in sets:
+                sources = sets[name]
+                break
+        for name in ['J', 'J_sinks', 'J_markets', 'J_warehouses']:
+            if name in sets:
+                sinks = sets[name]
+                break
+
+        if sources and sinks:
+            # Identify sinks with tight capacity
+            tight_sinks = []
+            for sink in sinks:
+                total_incoming = sum(arc_capacity.get((src, sink), 0) for src in sources)
+                sink_demand = demand.get(sink, 0)
+                if total_incoming < sink_demand * 1.2:  # Less than 20% buffer
+                    tight_sinks.append((sink, sink_demand, total_incoming))
+
+            if tight_sinks:
+                suggestions.append(
+                    "Sinks with tight arc capacity constraints (potential bottlenecks):"
+                )
+                for sink, demand_val, total_cap in tight_sinks:
+                    suggestions.append(
+                        f"  - '{sink}': demand={demand_val:.2f}, total incoming capacity={total_cap:.2f}"
+                    )
+                suggestions.append(
+                    "Try increasing arc capacities to these sinks, or add alternative routes."
+                )
+
+            # Suggest specific actions
+            suggestions.append(
+                "Possible fixes:"
+            )
+            suggestions.append(
+                "1. Increase individual arc capacities to relieve bottlenecks"
+            )
+            suggestions.append(
+                "2. Add new routes (arcs) between sources and sinks"
+            )
+            suggestions.append(
+                "3. Redistribute demand across sinks to better match available capacity"
+            )
+
+            # Give specific example
+            if tight_sinks:
+                sink, demand_val, total_cap in tight_sinks[0]
+                shortfall = demand_val - total_cap
+                if shortfall > 0:
+                    # Find best arc to increase
+                    best_arc = max(
+                        [(src, arc_capacity.get((src, sink), 0)) for src in sources],
+                        key=lambda x: x[1]
+                    )
+                    suggestions.append(
+                        f"Example: Increase capacity of route '{best_arc[0]}→{sink}' "
+                        f"from {best_arc[1]:.2f} to {best_arc[1] + shortfall:.2f}"
+                    )
+    else:
+        # Generic solver infeasibility (no arc capacities)
+        suggestions.append(
+            "The solver determined the constraint system is infeasible. "
+            "This means even with relaxed integer constraints, no solution exists."
+        )
+        suggestions.append(
+            "This could indicate:"
+        )
+        suggestions.append(
+            "1. Conflicting constraints that cannot be satisfied together"
+        )
+        suggestions.append(
+            "2. Insufficient capacity or resources to meet all requirements"
+        )
+        suggestions.append(
+            "3. Routing or connectivity issues not detected by simpler checks"
+        )
+        suggestions.append(
+            "Try relaxing some constraints or increasing capacities."
+        )
+
+    return suggestions

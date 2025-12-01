@@ -148,6 +148,112 @@ class EnhancedLLMClient(LLMClient):
             # Fallback to base client
             return self.base_client.extract_modification_parameters(user_request, original_params)
 
+    def parse_infeasibility_fix(self, user_message: str, current_params: Dict, infeasibility_context: Dict) -> Dict[str, Any]:
+        """
+        Parse user's response to infeasibility report.
+
+        Args:
+            user_message: User's modification message
+            current_params: Current problem parameters
+            infeasibility_context: Context about the infeasibility (layer, reasons, suggestions)
+
+        Returns:
+            {
+                "is_complete_redescription": bool,  # True if user provided complete new problem
+                "modifications": [
+                    {"type": "increase|decrease|set|add", "entity": "name", "parameter": "capacity", "value": float},
+                    ...
+                ],
+                "applied_params": Dict  # Modified parameters (if modifications parsed)
+            }
+        """
+        from .json_utils import safe_json_parse
+
+        # Use reasoning model for intelligent parsing
+        system = """You are parsing user modifications to fix an infeasible optimization problem.
+
+The user was told their problem is infeasible and given suggestions. They're now responding with either:
+1. A complete new problem description (redescription)
+2. Specific modifications like "increase capacity of A by 50" or "set demand for B to 100"
+
+Return JSON matching this schema:
+{
+  "is_complete_redescription": true/false,
+  "modifications": [
+    {
+      "type": "increase|decrease|set|add|remove",
+      "entity": "entity name (e.g., Factory1, Market2, route from A to B)",
+      "parameter": "capacity|demand|cost|arc_capacity|supply",
+      "value": numeric value (for increase/decrease, this is the delta; for set, this is the new value)
+    }
+  ]
+}
+
+Rules:
+- If the message looks like a complete new problem description, set is_complete_redescription=true and leave modifications empty
+- For modifications like "increase X by Y", type="increase", value=Y (POSITIVE number)
+- For modifications like "decrease X by Y", type="decrease", value=Y (POSITIVE number - the amount to decrease)
+- For modifications like "set X to Y", type="set", value=Y
+- For modifications like "add route from A to B with cost C", type="add"
+- Extract ALL modifications mentioned in the message
+- CRITICAL: For "decrease" operations, value should be POSITIVE (the magnitude of decrease), NOT negative
+"""
+
+        layer_info = infeasibility_context.get('layer_failed', 'unknown')
+        reasons = infeasibility_context.get('reasons', [])
+        suggestions = infeasibility_context.get('suggestions', [])
+
+        user = f"""User message: "{user_message}"
+
+Context:
+- Infeasibility detected at Layer {layer_info}
+- Reasons: {reasons[:2] if reasons else 'unknown'}
+- Suggestions given: {suggestions[:2] if suggestions else 'none'}
+
+Current parameters (for reference):
+{str(current_params)[:500]}
+
+Parse the user's response and return modifications."""
+
+        try:
+            response = self.reasoning_client._chat(system, user, json_mode=True)
+            result = safe_json_parse(response, {
+                "is_complete_redescription": False,
+                "modifications": []
+            })
+
+            # If complete redescription, return as-is
+            if result.get("is_complete_redescription", False):
+                return {
+                    "is_complete_redescription": True,
+                    "modifications": [],
+                    "applied_params": None  # Will be re-extracted
+                }
+
+            # Fix modification values (ensure decrease/increase have correct signs)
+            modifications = result.get("modifications", [])
+            for mod in modifications:
+                if mod.get("type") in ["decrease", "increase"]:
+                    # Value should always be positive (magnitude)
+                    mod["value"] = abs(mod.get("value", 0))
+
+            # Apply modifications to params
+            modified_params = self._apply_modifications(current_params, modifications)
+
+            return {
+                "is_complete_redescription": False,
+                "modifications": modifications,  # Return the fixed modifications
+                "applied_params": modified_params
+            }
+
+        except Exception as e:
+            return {
+                "is_complete_redescription": False,
+                "modifications": [],
+                "error": str(e),
+                "applied_params": current_params  # Return unchanged
+            }
+
     def suggest_analysis(self, solution: Dict, params: Dict, problem_type: str) -> List[str]:
         """Get problem-specific analysis suggestions"""
 
@@ -173,6 +279,183 @@ class EnhancedLLMClient(LLMClient):
         """Check if parameters match scheduling problem structure"""
         required_keys = {"orders", "units", "processing_time", "due_date"}
         return required_keys.issubset(set(params.keys()))
+
+    def _apply_modifications(self, params: Dict, modifications: List[Dict]) -> Dict:
+        """
+        Apply parsed modifications to parameters.
+
+        Args:
+            params: Current parameters
+            modifications: List of modification dicts
+
+        Returns:
+            Modified parameters (deep copy)
+        """
+        import copy
+
+        # Deep copy to avoid modifying original
+        modified = copy.deepcopy(params)
+
+        def find_entity_fuzzy(entity: str, entity_list: list) -> str:
+            """Find entity in list using fuzzy matching (case-insensitive, handles center/centre)"""
+            entity_lower = entity.lower().strip()
+
+            # Try exact match first
+            for e in entity_list:
+                if e == entity:
+                    return e
+
+            # Try case-insensitive match
+            for e in entity_list:
+                if e.lower() == entity_lower:
+                    return e
+
+            # Try with center/centre normalization
+            entity_normalized = entity_lower.replace('center', 'centre')
+            for e in entity_list:
+                if e.lower().replace('center', 'centre') == entity_normalized:
+                    return e
+
+            # No match found
+            return None
+
+        for mod in modifications:
+            mod_type = mod.get("type", "")
+            entity = mod.get("entity", "")
+            parameter = mod.get("parameter", "")
+            value = mod.get("value", 0)
+
+            try:
+                # Check if this is an arc capacity modification
+                # Entity like "arc from F1 to C" should be treated as arc_capacity
+                is_arc = "arc" in entity.lower() or " to " in entity.lower() or "→" in entity
+
+                if parameter in ["capacity", "supply"] and not is_arc:
+                    # Modify source/plant capacity (not arc capacity)
+                    if "capacity" in modified:
+                        # Use fuzzy matching to find entity
+                        matched_entity = find_entity_fuzzy(entity, list(modified["capacity"].keys()))
+                        if matched_entity:
+                            if mod_type == "increase":
+                                modified["capacity"][matched_entity] += value
+                            elif mod_type == "decrease":
+                                modified["capacity"][matched_entity] = max(0, modified["capacity"][matched_entity] - value)
+                            elif mod_type == "set":
+                                modified["capacity"][matched_entity] = value
+
+                elif (parameter in ["capacity", "supply"] and is_arc) or parameter == "arc_capacity":
+                    # Modify arc capacity - treat nested dict {i: {j: cap}} and flat dict {(i,j): cap}
+                    if "arc_capacity" not in modified:
+                        modified["arc_capacity"] = {}
+
+                    route = self._parse_route(entity, modified.get("plants", []), modified.get("markets", []))
+                    if route:
+                        source, sink = route
+
+                        # Ensure nested structure exists
+                        if source not in modified["arc_capacity"]:
+                            modified["arc_capacity"][source] = {}
+
+                        current_value = modified["arc_capacity"][source].get(sink, 0)
+
+                        if mod_type == "increase":
+                            modified["arc_capacity"][source][sink] = current_value + value
+                        elif mod_type == "decrease":
+                            modified["arc_capacity"][source][sink] = max(0, current_value - value)
+                        elif mod_type == "set":
+                            modified["arc_capacity"][source][sink] = value
+
+                elif parameter == "demand":
+                    # Modify sink/market demand
+                    if "demand" in modified:
+                        # Use fuzzy matching to find entity
+                        matched_entity = find_entity_fuzzy(entity, list(modified["demand"].keys()))
+                        if matched_entity:
+                            if mod_type == "increase":
+                                modified["demand"][matched_entity] += value
+                            elif mod_type == "decrease":
+                                modified["demand"][matched_entity] = max(0, modified["demand"][matched_entity] - value)
+                            elif mod_type == "set":
+                                modified["demand"][matched_entity] = value
+
+                elif parameter in ["cost", "distance"]:
+                    # Modify cost/distance for a route
+                    # Entity format: "A to B" or "A→B" or just tuple reference
+                    if parameter in modified and isinstance(modified[parameter], dict):
+                        # Try to parse entity as route
+                        route = self._parse_route(entity, modified.get("plants", []), modified.get("markets", []))
+                        if route and route in modified[parameter]:
+                            if mod_type == "increase":
+                                modified[parameter][route] += value
+                            elif mod_type == "decrease":
+                                modified[parameter][route] = max(0, modified[parameter][route] - value)
+                            elif mod_type == "set":
+                                modified[parameter][route] = value
+                        elif mod_type == "add" and route:
+                            # Add new route
+                            modified[parameter][route] = value
+
+            except Exception as e:
+                # If modification fails, skip it silently
+                print(f"Warning: Could not apply modification {mod}: {e}")
+                continue
+
+        return modified
+
+    def _parse_route(self, entity_str: str, sources: List[str], sinks: List[str]) -> Optional[tuple]:
+        """
+        Parse route entity string like "A to B" or "F1→M2" or "arc from F1 to C" into tuple (source, sink).
+
+        Args:
+            entity_str: String describing the route
+            sources: List of valid source names
+            sinks: List of valid sink names
+
+        Returns:
+            (source, sink) tuple or None if can't parse
+        """
+        entity_lower = entity_str.lower()
+
+        # Special case: "arc from X to Y" or "route from X to Y"
+        if " from " in entity_lower and " to " in entity_lower:
+            # Extract X and Y from "arc from X to Y"
+            from_idx = entity_lower.find(" from ")
+            to_idx = entity_lower.find(" to ", from_idx)
+
+            src_candidate = entity_str[from_idx + 6:to_idx].strip()  # 6 = len(" from ")
+            sink_candidate = entity_str[to_idx + 4:].strip()  # 4 = len(" to ")
+
+            # Try to match to actual source/sink names (case-insensitive, fuzzy)
+            for src in sources:
+                if src.lower() == src_candidate.lower():
+                    for sink in sinks:
+                        if sink.lower() == sink_candidate.lower():
+                            return (src, sink)
+
+        # Try different separators
+        separators = [" to ", "→", " -> ", "->"]
+
+        for sep in separators:
+            if sep in entity_lower or sep.strip() in entity_str:
+                parts = entity_str.split(sep) if sep in entity_str else entity_str.lower().split(sep)
+                if len(parts) >= 2:
+                    src_candidate = parts[0].strip()
+                    sink_candidate = parts[1].strip()
+
+                    # Try to match to actual source/sink names
+                    for src in sources:
+                        if src.lower() == src_candidate.lower() or src_candidate.lower() in src.lower():
+                            for sink in sinks:
+                                if sink.lower() == sink_candidate.lower() or sink_candidate.lower() in sink.lower():
+                                    return (src, sink)
+
+        # Try parsing as direct mention
+        for src in sources:
+            for sink in sinks:
+                if src.lower() in entity_lower and sink.lower() in entity_lower:
+                    return (src, sink)
+
+        return None
 
     # Future helper methods for other problem types:
 

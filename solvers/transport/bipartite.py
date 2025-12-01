@@ -240,33 +240,47 @@ class BipartiteTransportSolver(OptimizationSolver):
 
         status = str(res.solver.termination_condition).upper()
 
-        # Extract results (JSON-safe)
-        flows_list = [
-            {"plant": str(i), "market": str(j), "value": float(value(m.x[i, j]))}
-            for i in m.I for j in m.J
-        ]
-        objective_val = float(value(m.OBJ))
+        # Only extract results if solution is OPTIMAL
+        if status == 'OPTIMAL':
+            # Extract results (JSON-safe)
+            flows_list = [
+                {"plant": str(i), "market": str(j), "value": float(value(m.x[i, j]))}
+                for i in m.I for j in m.J
+            ]
+            objective_val = float(value(m.OBJ))
 
-        total_by_plant = {
-            str(i): float(sum(value(m.x[i, j]) for j in m.J))
-            for i in m.I
-        }
-        total_by_market = {
-            str(j): float(sum(value(m.x[i, j]) for i in m.I))
-            for j in m.J
-        }
-
-        return {
-            "status": status,
-            "solver_id": self.solver_id,
-            "objective": objective_val,
-            "objective_thousand_usd": objective_val,  # backward compatibility
-            "flows": flows_list,
-            "kpis": {
-                "total_by_plant": total_by_plant,
-                "total_by_market": total_by_market
+            total_by_plant = {
+                str(i): float(sum(value(m.x[i, j]) for j in m.J))
+                for i in m.I
             }
-        }
+            total_by_market = {
+                str(j): float(sum(value(m.x[i, j]) for i in m.I))
+                for j in m.J
+            }
+
+            return {
+                "status": status,
+                "solver_id": self.solver_id,
+                "objective_value": objective_val,  # Standard key name
+                "objective": objective_val,  # backward compatibility
+                "objective_thousand_usd": objective_val,  # backward compatibility
+                "flows": flows_list,
+                "kpis": {
+                    "total_by_plant": total_by_plant,
+                    "total_by_market": total_by_market
+                }
+            }
+        else:
+            # Return status without trying to extract uninitialized values
+            return {
+                "status": status,
+                "solver_id": self.solver_id,
+                "objective": None,
+                "objective_thousand_usd": None,
+                "flows": [],
+                "kpis": {},
+                "message": f"Solver terminated with status: {status}"
+            }
 
     def _normalize_distance(self, distance: Dict[str, Any]) -> Dict[tuple, float]:
         """
