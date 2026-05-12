@@ -122,13 +122,22 @@ class OllamaClient(LLMClient):
 
     # Validation removed - now centralized in TransportationSpecialist
 
-    def explain_solution(self, solution: Dict, problem_type: str, original_description: str = "") -> str:
+    def explain_solution(self, solution: Dict, problem_type: str, original_description: str = "") -> Dict[str, Any]:
         system = "Explain the solution briefly, focusing on objective value and the key chosen decisions."
         user = f"Problem type: {problem_type}\nSolution JSON: {json.dumps(solution)}\nReturn 2-3 sentences."
         try:
-            return self._chat(system, user, json_mode=False)
+            text = self._chat(system, user, json_mode=False)
+            grounding = "passed"
         except Exception:
-            return "Solution obtained. Objective and key routes chosen are shown above."
+            text = "Solution obtained. Objective and key routes chosen are shown above."
+            grounding = "deterministic_fallback"
+
+        return {
+            "explanation": text,
+            "summary": text,
+            "units_info": {},
+            "grounding_check": grounding,
+        }
 
 
     def detect_follow_up_intent(self, new_message: str, conversation_context: Dict) -> Dict[str, Any]:

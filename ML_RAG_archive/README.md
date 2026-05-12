@@ -101,12 +101,12 @@ ML_RAG_archive/
    - Compares classification with and without RAG
    - **Results:** WITHOUT RAG: 70%, WITH RAG: 50%
 
-3. **`tests/test_rag_parameter_extraction.py`**
+3. **`tests/demos/rag_parameter_extraction.py`**
    - Compares parameter extraction with/without RAG
    - Tests transportation and scheduling problems
    - **Results:** RAG causes timeouts on 2/10 problems
 
-4. **`tests/test_llm_reasoning_chain.py`**
+4. **`tests/demos/llm_reasoning_chain.py`**
    - Can optionally enable RAG for full conversation flow
    - Tests follow-up handling with RAG context
 
@@ -292,7 +292,7 @@ python tests/test_classification.py --solvable --show-rag
 python tests/test_classification.py --solvable --compare-rag
 
 # Test RAG parameter extraction
-python tests/test_rag_parameter_extraction.py --solvable
+python tests/demos/rag_parameter_extraction.py --solvable
 
 # Manage RAG knowledge base
 python ML_RAG_archive/scripts/manage_knowledge_base.py stats

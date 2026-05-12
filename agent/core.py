@@ -416,7 +416,7 @@ class OptimizationAgent:
         # Re-check feasibility
         update_progress("Re-checking feasibility...", 50)
         from feasibility.core import check_feasibility, FeasStatus
-        from extraction.parsed_instance import ParsedInstance
+        from feasibility.schemas import ParsedInstance
 
         instance = ParsedInstance(
             problem_type=infeas_info["problem_type"],

@@ -11,10 +11,11 @@ class EnhancedLLMClient(LLMClient):
     """
     Enhanced LLM client with multi-model pipeline.
 
-    Uses different specialized models for different stages:
-    - Classification: qwen2:7b-instruct (fast, accurate)
-    - Extraction: llama3.1:8b-instruct-q8_0 (structured JSON)
-    - Reasoning: deepseek-r1:latest (explanations, what-ifs)
+    Uses different specialized models for different stages (actual model names
+    come from Config; defaults shown for illustration):
+    - Classification: Config.CLASSIFICATION_MODEL (default qwen2.5:3b-instruct — fast)
+    - Extraction:     Config.EXTRACTION_MODEL    (default qwen2.5-coder:7b — structured JSON)
+    - Reasoning:      Config.REASONING_MODEL     (default deepseek-r1:latest — explanations, what-ifs)
     """
 
     def __init__(
@@ -37,16 +38,16 @@ class EnhancedLLMClient(LLMClient):
         self.host = host
         self.kb = knowledge_base
 
-        # Stage A: Classification (qwen2:7b-instruct)
+        # Stage A: Classification (Config.CLASSIFICATION_MODEL)
         self.classification_client = OllamaClient(host, Config.CLASSIFICATION_MODEL)
         self.classifier = ProblemClassifier(self.classification_client)
 
-        # Stage B: Parameter Extraction (llama3.1:8b-instruct-q8_0)
+        # Stage B: Parameter Extraction (Config.EXTRACTION_MODEL)
         self.extraction_client = OllamaClient(host, Config.EXTRACTION_MODEL)
         self.transportation = TransportationSpecialist(self.extraction_client, knowledge_base)
         self.scheduling = SchedulingSpecialist(self.extraction_client, knowledge_base)
 
-        # Stage E: Reasoning & Explanations (deepseek-r1:latest)
+        # Stage E: Reasoning & Explanations (Config.REASONING_MODEL)
         self.reasoning_client = OllamaClient(host, Config.REASONING_MODEL)
 
         # Legacy: base_client points to classification for backward compatibility

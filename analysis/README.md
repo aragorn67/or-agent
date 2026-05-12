@@ -765,23 +765,23 @@ results = execute_analysis('sensitivity', solver, params, solution, query, llm)
 
 ## Testing
 
-### Test Files:
-- `tests/test_complete_analysis_suite.py`: Comprehensive test (4/4 passing)
+### Demo Scripts:
+- `tests/demos/complete_analysis_suite.py`: Comprehensive demo (4/4 passing)
   - Tests 3 infeasible problems (one from each layer) + 1 feasible
   - For each: solve/fix → sensitivity → what-if → resolve
   - **Status**: ✅ ALL PASSING for transportation
 
-- `tests/test_OptAI.py`: Interactive workflow test
+- `tests/demos/OptAI_interactive.py`: Interactive workflow demo
   - Full optimization workflow with analysis capabilities
   - **Status**: ✅ WORKING
 
-### Run Tests:
+### Run Demos:
 ```bash
 # Complete analysis suite
-python tests/test_complete_analysis_suite.py
+python tests/demos/complete_analysis_suite.py
 
-# Interactive test
-python tests/test_OptAI.py
+# Interactive demo
+python tests/demos/OptAI_interactive.py
 ```
 
 ---

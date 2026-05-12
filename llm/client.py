@@ -16,8 +16,16 @@ class LLMClient(ABC):
         pass
 
     @abstractmethod
-    def explain_solution(self, solution: Dict, problem_type: str, original_description: str = "") -> str:
-        """Generate natural language explanation of solution"""
+    def explain_solution(self, solution: Dict, problem_type: str, original_description: str = "") -> Dict[str, Any]:
+        """
+        Generate natural language explanation of solution.
+
+        Returns a dict with at least:
+            - 'explanation': detailed natural language explanation
+            - 'summary': brief one-line summary
+            - 'units_info': detected units (currency, distance, etc.)
+            - 'grounding_check': 'passed' | 'deterministic_fallback'
+        """
         pass
 
     @abstractmethod

@@ -25,9 +25,9 @@ An intelligent optimization agent that understands complex problems described in
 - **Solution Explanations**: Clear, business-friendly interpretations
 
 ### 🚀 **Modern Architecture**
-- **Plugin-Based Solvers**: Easily add new optimization problem types
-- **Hybrid Classification**: Combines rule-based labeling functions with ML (ready for training)
-- **Local LLM Integration**: Uses Ollama for privacy and cost-effectiveness
+- **Modular Solver Registry**: Solvers register via `OptimizationSolver` interface (`solvers/base.py`); currently ships two: bipartite transportation and single-stage IPM scheduling
+- **LLM-Based Classification**: DeepSeek-R1 with a 5-vote majority over a JSON-Schema-bound taxonomy. (Rule-based labeling functions and an ML classifier were prototyped — both underperformed and are preserved in `ML_RAG_archive/` for reference.)
+- **Local LLM Integration**: Three-stage Ollama pipeline (small classifier, coder for extraction, reasoning model for explanations) for privacy and cost-effectiveness
 - **Real-Time Progress**: Beautiful progress indicators during solving
 - **Scalable Design**: Ready for production deployment
 - **Web Interface**: Clean, intuitive browser-based interface
@@ -63,7 +63,7 @@ Text Input → agent/core.py → LLM classifies → Specialist extracts params �
   - `core.py` - Entry point, routes all requests (READ THIS FIRST)
 - `llm/` - **Language understanding**
   - `intent_router.py` - Detects: new problem vs question vs analysis
-  - `problem_classifier.py` - LLM-based classification (70% accuracy)
+  - `problem_classifier.py` - LLM-based classification (70% on 27-problem OR-Library; 90% on 10-problem solvable subset)
   - `transportation_specialist.py` - Extracts shipping parameters from text
   - `scheduling_specialist.py` - Extracts scheduling parameters from text
   - `ollama_client.py` - Communicates with Ollama LLM
@@ -81,11 +81,11 @@ Text Input → agent/core.py → LLM classifies → Specialist extracts params �
   - Runs sensitivity analysis
 
 ### **Classification System** (Problem type detection)
-- `or_classify/` - **Hybrid classifier** (rules + ML)
+- `or_classify/` - Hybrid-classifier scaffolding (rules + ML); **not used in production** — production path is `llm/problem_classifier.py`
   - `lfs/` - 25 labeling functions (deterministic pattern matching)
   - `feature_pipeline.py` - Converts text to ML features
   - `taxonomy.yml` - 9 problem families, 25+ subtypes
-  - **Status:** LLM-based classification used in production (70% accuracy)
+  - **Status:** LLM-based classification used in production (70% on 27-problem OR-Library; 90% on 10-problem solvable subset). ML classifier was prototyped, scored 44% on OR-Library, and was archived (`ML_RAG_archive/`).
 
 ### **Web Interface** (For future use)
 - `schemas/` - API request/response validation schemas
@@ -106,29 +106,31 @@ Text Input → agent/core.py → LLM classifies → Specialist extracts params �
 setup.bat           # Install (5-10 min, one-time)
 run.bat            # Run tests
 ```
-See `INSTALL_WINDOWS.md` for detailed help.
 
 ### **Mac/Linux Users:**
 ```bash
 ./setup.sh         # Install
 source Tolis_Env/bin/activate
-cd tests
-python Overall_Test.py  # See it work!
+python tests/demos/OptAI_interactive.py  # See it work
 ```
 
 ### **Prerequisites:**
 - Python 3.8+ ([python.org](https://python.org))
-- Ollama with qwen2:7b model ([ollama.ai](https://ollama.ai))
-- GLPK solver (see INSTALL_WINDOWS.md)
+- Ollama running locally ([ollama.ai](https://ollama.ai)) with the three models pulled:
+  - `qwen2.5:3b-instruct` (classification)
+  - `qwen2.5-coder:7b` (parameter extraction)
+  - `deepseek-r1:latest` (reasoning / explanations)
+- GLPK solver (Linux: `sudo apt install glpk-utils`; macOS: `brew install glpk`)
 
 ### **Run the Tests** (Recommended):
 ```bash
-cd tests/
-python Overall_Test.py              # Main demo - shows full reasoning
-python test_complete_workflow.py   # Wine distribution example
-python -m pytest test_llm_refactoring.py -v  # 44 unit tests
+python -m pytest tests/                       # 75 unit/integration tests
+python -m pytest tests/test_llm_refactoring.py -v  # 44 LLM-stack unit tests
+
+# Walk-through demos (require Ollama running):
+python tests/demos/complete_analysis_suite.py
+python tests/demos/OptAI_interactive.py
 ```
-See `tests/README.md` for details.
 
 ## 💡 Usage Examples
 
@@ -190,10 +192,10 @@ Minimize total completion time (makespan).
 
 ### 🔄 **Classification System Status**
 - **Category-level**: 80% accuracy (TRANSPORTATION vs SCHEDULING)
-- **Subcategory-level**: ⚠️ **BLOCKED** - requires ML training
-  - Zero-shot LLM: ~25% accuracy on scheduling subtypes
+- **Subcategory-level**: ⚠️ **Blocked on evaluation, not model**
+  - Zero-shot LLM is ~25% on scheduling subtypes, but with only a 10–27 problem benchmark the noise floor is too high to iterate on
   - Infrastructure ready: 25 labeling functions + feature pipeline
-  - **Waiting for training data** (see `RESUME_WHEN_DATA_READY.md`)
+  - The original plan was to gather training data; a more promising path is programmatic eval expansion (paraphrase + metamorphic + reverse-generation) before any retraining
 
 ### 🚧 **In Development**
 - **Assignment Problems** - Worker-task matching (infrastructure ready)
@@ -254,34 +256,33 @@ Response: {
 ```bash
 source Tolis_Env/bin/activate
 
-# All tests
-python -m pytest tests/ -v
+# All pytest-collected tests
+python -m pytest tests/ -v                       # 75 tests collected
 
-# Specific test suites
-python tests/test_llm_refactoring.py          # 44 unit tests
-python tests/test_phase1_runner.py --categories TRANSPORTATION
-python tests/test_phase1_runner.py --categories SCHEDULING
+# Specific suites
+python -m pytest tests/test_llm_refactoring.py -v   # 44 LLM-stack unit tests
+python -m pytest tests/test_feasibility.py -v       # 3-layer feasibility checker
+python -m pytest tests/test_normalizer.py -v        # label normalizer
 
-# Integration tests
-python tests/Overall_Test.py                   # Full reasoning chain demo
-python tests/test_complete_workflow.py
+# Walk-through demos (require Ollama running)
+python tests/demos/complete_analysis_suite.py
+python tests/demos/OptAI_interactive.py
 ```
 
 ### **Test Coverage**
-- 15 test files covering all components
-- 44+ unit tests for LLM refactoring
-- 30+ classification test cases
-- 18 scheduling test cases
-- Integration tests for end-to-end workflows
-
-See `tests/README.md` for detailed test documentation.
+- 75 pytest-collected tests across `tests/`
+- 44 LLM-stack unit tests in `test_llm_refactoring.py`
+- 3-layer feasibility checker (`test_feasibility.py`) — 12 tests
+- Demo / walk-through scripts in `tests/demos/` (not collected by pytest)
 
 ## 🔧 Configuration
 
 ### **Environment Variables**
 ```bash
 OLLAMA_HOST=http://localhost:11434
-OLLAMA_MODEL=qwen2:7b
+CLASSIFICATION_MODEL=qwen2.5:3b-instruct    # intent + problem classifier
+EXTRACTION_MODEL=qwen2.5-coder:7b           # structured JSON parameter extraction
+REASONING_MODEL=deepseek-r1:latest          # explanations, infeasibility repair
 API_HOST=0.0.0.0
 API_PORT=8000
 ```
@@ -320,23 +321,15 @@ API_PORT=8000
 - ✅ Web interface with file upload
 
 ### **Known Limitations**
-- ⚠️ **Classification blocked**: Scheduling subcategories require ML training
-  - Current: 25% accuracy on subcategories
-  - Infrastructure ready, waiting for training data
-  - See `RESUME_WHEN_DATA_READY.md` for details
-
+- ⚠️ **Subcategory classification noisy**: ~25% on scheduling subtypes, but measured on a small (10–27 problem) benchmark — the next step is programmatic eval expansion, not more model work
 - ⚠️ **Scheduling scope limited**: Only single-stage problems
   - ✅ Can solve: single_stage_scheduling, batch_scheduling
   - ❌ Cannot solve: job_shop, flow_shop, shift_rostering, project_scheduling
-
-- 🚧 **Other problem types**: Infrastructure ready, solvers not implemented yet
+- 🚧 **Other problem types**: Taxonomy + labeling-function scaffolding exist; no solvers yet
+- ⚠️ **No data layer**: All input is natural-language text. CSV/Excel ingestion is the next major piece (see `brainstorm_ideas.md` Priority 1)
 
 ### **Development Roadmap**
-See `RESUME_WHEN_DATA_READY.md` for:
-- ML training requirements
-- Data collection progress
-- Success metrics
-- Next steps
+See `brainstorm_ideas.md` for the prioritized roadmap (data layer, model persistence, solver-strategy selection, decomposition).
 
 ## 📂 Detailed File Map
 
@@ -348,25 +341,30 @@ See `RESUME_WHEN_DATA_READY.md` for:
 5. `analysis/engine.py` - Generates visualizations
 
 **Key files to understand:**
-- `agent/core.py` - Start here, 400 lines, main orchestrator
-- `llm/ollama_client.py` - LLM communication, structured output
-- `solvers/transportation_solver.py` - Example solver (Pyomo + GLPK)
-- `or_classify/lfs/` - Classification rules (25 files)
+- `agent/core.py` - Start here, ~830 lines, main orchestrator
+- `llm/enhanced_client.py` - Three-stage LLM pipeline + specialist dispatch
+- `llm/ollama_client.py` - HTTP layer for Ollama, JSON mode, error mapping
+- `solvers/transport/bipartite.py` - Bipartite transportation solver (Pyomo + GLPK)
+- `solvers/scheduling/single_stage_ipm.py` - Single-stage scheduling solver
+- `feasibility/core.py` - 3-layer feasibility checker
 
 **Complete tree:**
 ```
-agent/core.py              Main orchestrator (read this first)
-llm/intent_router.py       Detects problem vs question vs analysis
-llm/transportation_specialist.py   Extracts shipping params
-llm/scheduling_specialist.py       Extracts scheduling params
-llm/ollama_client.py       Talks to Ollama LLM
-solvers/transportation_solver.py   Solves shipping problems
-solvers/scheduling_solver.py       Solves scheduling problems
-solvers/base.py            Solver interface
-analysis/engine.py         Creates charts
-or_classify/lfs/           25 classification rules
-tests/Overall_Test.py      Best example to understand flow
-api.py                     Web server (not updated)
+agent/core.py                            Main orchestrator (read this first)
+llm/enhanced_client.py                   3-stage LLM pipeline + specialist dispatch
+llm/intent_router.py                     Smalltalk / help / optimization / follow-up
+llm/problem_classifier.py                Schema-bound classifier with 5-vote majority
+llm/transportation_specialist.py         Extracts shipping params (JSON)
+llm/scheduling_specialist.py             Extracts scheduling params (JSON)
+llm/ollama_client.py                     Talks to Ollama LLM
+solvers/transport/bipartite.py           Solves bipartite shipping problems
+solvers/scheduling/single_stage_ipm.py   Solves single-stage scheduling
+solvers/base.py                          Solver interface
+feasibility/core.py                      3-layer feasibility orchestrator
+analysis/engine.py                       Creates charts
+or_classify/lfs/                         25 classification rules (scaffolding)
+tests/demos/OptAI_interactive.py         Best demo to understand the flow
+api.py                                   Web server (not currently used by the agent path)
 ```
 
 ## 🤝 Contributing
@@ -408,6 +406,6 @@ This project is licensed under the MIT License.
 
 **Current Status**: ✅ Core features production-ready (Classification, Feasibility Checking, Multi-Stage Solvers)
 
-**Next Milestone**: Improve classification accuracy from 70% to 80-90% (see `Claude_Diary.md` TODO list)
+**Next Milestone**: Lift classification on the full 27-problem OR-Library set from 70% toward 80-90% (already 90% on the 10-problem solvable subset; see `Claude_Diary.md` TODO list)
 
 **Made with ❤️ for the optimization community**

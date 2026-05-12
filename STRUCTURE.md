@@ -33,8 +33,9 @@ optimization-ai/
 │   ├── unit/                 # Unit tests
 │   ├── integration/          # Integration tests
 │   └── fixtures/             # Test data and fixtures
-├── docs/                     # Documentation
-│   ├── README.md             # Main documentation
+├── README.md                 # Main documentation (project root)
+├── docs/                     # Supporting documentation
+│   ├── README.md             # Pointer to the root README
 │   ├── brainstorm_ideas.md   # Architecture and roadmap
 │   └── Claude_Diary.md       # Development log
 ├── archive/                  # Old/deprecated code
@@ -82,7 +83,7 @@ optimization-ai/
 - `registry.py` - Solver registration and discovery
 
 ### **or_classify/** - Problem Type Classification
-- Uses LLMs (DeepSeek-R1) for 100% accuracy on solvable problems
+- Uses LLMs (DeepSeek-R1) for classification: 70% on the 27-problem OR-Library set, 90% on the 10-problem solvable subset (see `ML_RAG_archive/README.md`)
 - Labeling functions for pattern matching
 - Supports 8+ problem types
 
@@ -104,9 +105,8 @@ Empty directory structure ready for:
 
 This is the **#1 priority** for enabling production usage with real business data.
 
-### **docs/** - Centralized Documentation
-Moved all documentation files here:
-- `README.md` - Main project documentation
+### **docs/** - Supporting Documentation
+- `README.md` - Pointer to the root README (kept to avoid drift; main doc is at the project root)
 - `brainstorm_ideas.md` - Architecture, roadmap, and priorities
 - `Claude_Diary.md` - Development history and decisions
 
@@ -141,7 +141,7 @@ Safely archived:
 ## 📊 Current Status
 
 ### ✅ Production Ready
-- Problem classification (100% accuracy)
+- Problem classification (70% on 27-problem OR-Library; 90% on 10-problem solvable subset)
 - 3-layer feasibility checking
 - Sensitivity analysis
 - What-if scenarios
@@ -192,7 +192,7 @@ pytest tests/ --cov=.
 
 ## 📚 Key Documentation Files
 
-- `docs/README.md` - Main project documentation
+- `README.md` (project root) - Main project documentation
 - `docs/brainstorm_ideas.md` - Architecture, bottlenecks, and 6-month roadmap
 - `docs/Claude_Diary.md` - Detailed development history
 - `analysis/README.md` - Analysis framework documentation (comprehensive)

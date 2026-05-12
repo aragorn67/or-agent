@@ -18,7 +18,7 @@ REQUIRES: Ollama (localhost:11434), deepseek-r1:latest model
 
 import sys
 import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from tests.or_problem_repository import get_solvable_problems
 from llm.enhanced_client import EnhancedLLMClient

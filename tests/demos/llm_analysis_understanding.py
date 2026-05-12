@@ -20,7 +20,7 @@ REQUIRES: Ollama (localhost:11434), deepseek-r1:latest model
 
 import sys
 import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from llm.enhanced_client import EnhancedLLMClient
 from config import Config
@@ -33,7 +33,7 @@ import numpy as np
 from datetime import datetime
 
 # Create output directory for plots
-OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "test_output")
+OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "..", "test_output")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 def save_plot(fig, name):
