@@ -42,7 +42,7 @@ from tests.or_problem_repository import (
 from llm.enhanced_client import EnhancedLLMClient
 from config import Config
 from llm.intent_router import IntentRouter
-from llm.knowledge_base import KnowledgeBase
+# from llm.knowledge_base import KnowledgeBase  # RAG removed
 import argparse
 import pickle
 from pathlib import Path
@@ -55,13 +55,13 @@ def test_classification(problems, llm_client, show_rag=False):
     Args:
         problems: List of problems to test
         llm_client: EnhancedLLMClient instance
-        show_rag: If True, show RAG retrieval details
+        show_rag: If True, show RAG retrieval details (DISABLED - RAG removed)
 
     Returns:
         dict: Results with total, correct_intent, correct_category, correct_type, all_three_correct, errors
     """
     intent_router = IntentRouter(llm_client)
-    kb = llm_client.kb  # Access knowledge base from client
+    kb = None  # RAG removed
 
     results = {
         'total': 0,
@@ -98,29 +98,7 @@ def test_classification(problems, llm_client, show_rag=False):
         print(f"  Expected: intent=optimization, category={expected_category}, type={expected_type}")
 
         try:
-            # Show RAG retrieval if requested
-            if show_rag and kb:
-                print(f"\n  🔍 RAG RETRIEVAL:")
-                # Query knowledge base for relevant context
-                query = f"{expected_type} problem canonical definition objective variables constraints"
-                rag_results = kb.search(query, k=2)
-
-                if rag_results:
-                    results['rag_used'] += 1
-                    print(f"     Query: '{query}'")
-                    print(f"     Found: {len(rag_results)} relevant chunks")
-                    for i, result in enumerate(rag_results, 1):
-                        # Show snippet of retrieved text
-                        content = result.get('content', '')
-                        snippet = content[:160].replace('\n', ' ')
-                        print(f"     [{i}] {snippet}...")
-                        metadata = result.get('metadata', {})
-                        if metadata:
-                            source = metadata.get('source', 'unknown')
-                            page = metadata.get('page', '?')
-                            print(f"         ← {source} p.{page}")
-                else:
-                    print(f"     (no chunks found)")
+            # RAG retrieval removed
 
             # Classify the problem using unified classify() method
             conversation_context = {'last_solution': None, 'messages': []}
@@ -385,6 +363,36 @@ def print_summary(classification_results, schema_results=None):
     print(f"  Type accuracy:      {classification_results['correct_type']}/{t} = {classification_results['correct_type']/t*100:.1f}%")
     print(f"  All-three accuracy: {classification_results['all_three_correct']}/{t} = {classification_results['all_three_correct']/t*100:.1f}%")
 
+    # Compute ML metrics (for type classification - the most important metric)
+    correct = classification_results['correct_type']
+    incorrect = t - correct
+
+    # For binary classification metrics (treating each type as binary: correct vs incorrect)
+    # True Positives: correctly classified as the expected type
+    # False Negatives: incorrectly classified (missed the correct type)
+    tp = correct
+    fn = incorrect
+    # Since we're measuring accuracy, not detection, we consider:
+    # Precision = TP / (TP + FP), but in multi-class, we use macro averaging
+
+    # Calculate per-class metrics if we have error details
+    if correct > 0 or incorrect > 0:
+        accuracy = correct / t
+
+        # For a multi-class setting, compute macro precision/recall/F1
+        # Precision: When we predict type X, how often is it correct?
+        # Recall: Of all actual type X, how many did we find?
+        # For perfect classification, both are 100%
+
+        precision = accuracy  # In our setup, precision = recall = accuracy
+        recall = accuracy
+        f1_score = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
+
+        print(f"\n  📊 ML Metrics (Type Classification):")
+        print(f"     Precision: {precision*100:.1f}%")
+        print(f"     Recall:    {recall*100:.1f}%")
+        print(f"     F1-Score:  {f1_score*100:.1f}%")
+
     # Show RAG usage statistics
     if classification_results.get('rag_used', 0):
         print(f"\n  📚 RAG retrievals: {classification_results['rag_used']}/{t}")
@@ -425,10 +433,10 @@ def main():
                        help='Test only problems in this category')
     parser.add_argument('--schema', action='store_true',
                        help='Also test schema extraction')
-    parser.add_argument('--show-rag', action='store_true',
-                       help='Show RAG retrieval details for each problem')
-    parser.add_argument('--compare-rag', action='store_true',
-                       help='Compare classification with and without RAG')
+    # parser.add_argument('--show-rag', action='store_true',
+    #                    help='Show RAG retrieval details for each problem')  # RAG removed
+    # parser.add_argument('--compare-rag', action='store_true',
+    #                    help='Compare classification with and without RAG')  # RAG removed
     parser.add_argument('--host', type=str, default='http://localhost:11434',
                        help='Ollama host (default: http://localhost:11434)')
     parser.add_argument('--model', type=str, default='deepseek-r1:latest',
@@ -464,8 +472,8 @@ def main():
         print_summary(classification_results, None)
         return 0 if not classification_results['errors'] else 1
 
-    # Check if comparison mode is requested
-    if args.compare_rag:
+    # RAG comparison mode removed
+    if False:  # args.compare_rag removed
         print("\n" + "="*80)
         print("  COMPARISON MODE: WITH vs WITHOUT RAG")
         print("="*80 + "\n")
@@ -539,27 +547,18 @@ def main():
         return 0 if len(results_with_rag['errors']) == 0 else 1
 
     # Normal mode (not comparison)
-    # Initialize knowledge base if --show-rag is enabled
-    kb = None
-    if args.show_rag:
-        try:
-            print("Loading RAG knowledge base...")
-            kb = KnowledgeBase()
-            print(f"✓ RAG knowledge base loaded\n")
-        except Exception as e:
-            print(f"⚠️  Could not load knowledge base: {e}")
-            print("Continuing without RAG...\n")
+    # RAG initialization removed
 
     # Initialize LLM client
     try:
-        llm_client = EnhancedLLMClient(host=args.host, model=args.model, knowledge_base=kb)
+        llm_client = EnhancedLLMClient(host=args.host, model=args.model)
         print(f"✓ Connected to {args.host} using model {args.model}\n")
     except Exception as e:
         print(f"✗ Failed to connect to LLM: {e}")
         return 1
 
     # Run classification tests
-    classification_results = test_classification(problems, llm_client, show_rag=args.show_rag)
+    classification_results = test_classification(problems, llm_client, show_rag=False)  # RAG removed
 
     # Run schema extraction tests if requested
     schema_results = None

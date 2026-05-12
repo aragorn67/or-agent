@@ -7,6 +7,7 @@ Compares scenario results with the original solution.
 
 from typing import Dict, Any, List
 import copy
+from analysis.instance_builder import build_instance_from_params
 
 
 def perform_what_if_scenario(
@@ -14,7 +15,9 @@ def perform_what_if_scenario(
     solver,
     params: Dict[str, Any],
     solution: Dict[str, Any],
-    query: str
+    query: str,
+    problem_type: str = None,
+    solver_id: str = None
 ) -> Dict[str, Any]:
     """
     Perform a what-if scenario analysis.
@@ -25,6 +28,8 @@ def perform_what_if_scenario(
         params: Current problem parameters
         solution: Current solution
         query: User's query
+        problem_type: Problem type (extracted from solution if not provided)
+        solver_id: Solver identifier (extracted from solver if not provided)
 
     Returns:
         Dictionary with:
@@ -37,6 +42,11 @@ def perform_what_if_scenario(
         - cost_diff_pct: float
         - flow_changes: List[Dict]
     """
+    # Extract problem_type and solver_id if not provided
+    if problem_type is None:
+        problem_type = solution.get('problem_type', 'TRANSPORTATION')
+    if solver_id is None:
+        solver_id = getattr(solver, 'solver_id', 'unknown')
     # Parse modification using LLM
     modification_result = llm_client.parse_infeasibility_fix(
         query,
@@ -54,9 +64,9 @@ def perform_what_if_scenario(
     # Apply modification to a deep copy
     scenario_params = copy.deepcopy(modification_result.get("applied_params", params))
 
-    # Check feasibility BEFORE solving
+    # Check feasibility BEFORE solving using generic instance builder
     from feasibility.core import check_feasibility, FeasStatus
-    scenario_instance = _create_instance_for_feasibility(scenario_params)
+    scenario_instance = build_instance_from_params(scenario_params, problem_type, solver_id)
     feas_report = check_feasibility(scenario_instance)
 
     if feas_report.status == FeasStatus.INFEASIBLE:
@@ -216,20 +226,3 @@ def format_scenario_results(results: Dict[str, Any]) -> str:
     return "\n".join(output)
 
 
-def _create_instance_for_feasibility(params: Dict[str, Any]) -> Dict[str, Any]:
-    """Helper to create instance dict for feasibility checking."""
-    return {
-        'problem_type': 'TRANSPORTATION',
-        'solver_id': 'transport_basic_bipartite',
-        'sets': {
-            'I_plants': params.get('plants', []),
-            'J_markets': params.get('markets', [])
-        },
-        'params': {
-            'supply': params.get('capacity', {}),
-            'demand': params.get('demand', {}),
-            'cost': {(plant, market): cost
-                     for plant, markets in params.get('cost', {}).items()
-                     for market, cost in markets.items()}
-        }
-    }

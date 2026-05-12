@@ -48,7 +48,13 @@ Classify the query into ONE of these analysis types:
    - "update capacity to 500 and solve"
 
 4. "pareto" - User wants multi-objective tradeoff analysis
-   Examples: "pareto front", "tradeoff between cost and time"
+   Key indicators: "pareto", "tradeoff", "trade-off", "multi-objective", "vs", "versus"
+   Examples:
+   - "show me the pareto front"
+   - "what's the tradeoff between cost and distance"
+   - "analyze cost vs distance"
+   - "generate pareto analysis"
+   - "I want to see cost versus distance tradeoffs"
 
 5. "unknown" - None of the above or unclear
 
@@ -111,7 +117,8 @@ def detect_analysis_type_keyword_based(query: str) -> str:
         return 'resolve'
 
     # Pareto front
-    if any(kw in query_lower for kw in ['pareto', 'multi-objective', 'tradeoff']):
+    if any(kw in query_lower for kw in ['pareto', 'multi-objective', 'tradeoff', 'trade-off',
+                                          ' vs ', ' versus ', 'analyze cost', 'cost and distance']):
         return 'pareto'
 
     return 'unknown'
@@ -175,13 +182,16 @@ def execute_analysis(
     """
     if analysis_type == 'sensitivity':
         from .sensitivity.engine import perform_sensitivity_analysis
-        return perform_sensitivity_analysis(solver, params, solution, query)
+        return perform_sensitivity_analysis(solver, params, solution, query, llm_client)
 
     elif analysis_type == 'what_if':
         if llm_client is None:
             raise ValueError("LLM client required for what-if scenarios")
         from .scenarios.engine import perform_what_if_scenario
-        return perform_what_if_scenario(llm_client, solver, params, solution, query)
+        # Extract problem_type and solver_id from solution/solver
+        problem_type = solution.get('problem_type')
+        solver_id = getattr(solver, 'solver_id', None)
+        return perform_what_if_scenario(llm_client, solver, params, solution, query, problem_type, solver_id)
 
     elif analysis_type == 'resolve':
         if llm_client is None:
@@ -190,10 +200,10 @@ def execute_analysis(
         return resolve_with_modification(llm_client, solver, params, solution, query)
 
     elif analysis_type == 'pareto':
-        return {
-            'success': False,
-            'message': 'Pareto front generation not yet implemented'
-        }
+        from .pareto.engine import perform_pareto_analysis
+        # Extract problem_type from solution
+        problem_type = solution.get('problem_type')
+        return perform_pareto_analysis(solver, params, solution, num_points=10, problem_type=problem_type)
 
     else:
         raise ValueError(f"Unknown analysis type: {analysis_type}")
@@ -223,7 +233,8 @@ def format_analysis_output(analysis_type: str, results: Dict[str, Any]) -> str:
         return format_modification_results(results)
 
     elif analysis_type == 'pareto':
-        return "⚠️  Pareto front generation not yet implemented"
+        from .pareto.engine import format_pareto_results
+        return format_pareto_results(results)
 
     else:
         return f"⚠️  Unknown analysis type: {analysis_type}"

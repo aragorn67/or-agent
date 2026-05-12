@@ -7,45 +7,18 @@ Tests multiple values for a selected parameter and reports cost changes.
 
 from typing import Dict, Any, List, Tuple, Optional
 import copy
-
-
-def extract_parameter_from_query(query: str, params: Dict[str, Any]) -> Optional[Tuple[str, str]]:
-    """
-    Extract the parameter to analyze from user query.
-
-    Args:
-        query: User's natural language query
-        params: Current problem parameters
-
-    Returns:
-        Tuple of (parameter_type, entity_name) or None if not found
-
-    Examples:
-        >>> extract_parameter_from_query("sensitivity on Plant North capacity", params)
-        ('capacity', 'Plant North')
-    """
-    query_lower = query.lower()
-
-    # Check for capacity/supply parameters
-    if 'capacity' in query_lower or 'supply' in query_lower:
-        for plant in params.get('plants', []):
-            if plant.lower() in query_lower:
-                return ('capacity', plant)
-
-    # Check for demand parameters
-    if 'demand' in query_lower:
-        for market in params.get('markets', []):
-            if market.lower() in query_lower:
-                return ('demand', market)
-
-    return None
+from analysis.parameter_detector import detect_parameter_from_query
+from analysis.instance_builder import build_instance_from_params
 
 
 def perform_sensitivity_analysis(
     solver,
     params: Dict[str, Any],
     solution: Dict[str, Any],
-    query: str
+    query: str,
+    llm_client=None,
+    problem_type: str = None,
+    solver_id: str = None
 ) -> Dict[str, Any]:
     """
     Perform sensitivity analysis on a parameter.
@@ -55,6 +28,9 @@ def perform_sensitivity_analysis(
         params: Current problem parameters
         solution: Current solution
         query: User's query
+        llm_client: LLM client for parameter detection (optional for backward compatibility)
+        problem_type: Problem type (e.g., 'TRANSPORTATION', 'SCHEDULING') - extracted from solution if not provided
+        solver_id: Solver identifier - extracted from solver if not provided
 
     Returns:
         Dictionary with:
@@ -67,16 +43,22 @@ def perform_sensitivity_analysis(
         - costs: List[float | None]
         - insights: Dict with cost_range, best_value, savings
     """
-    # Extract parameter to analyze
-    param_info = extract_parameter_from_query(query, params)
+    # Extract problem_type and solver_id if not provided
+    if problem_type is None:
+        problem_type = solution.get('problem_type', 'TRANSPORTATION')
+    if solver_id is None:
+        solver_id = getattr(solver, 'solver_id', 'unknown')
+    # Extract parameter to analyze using dynamic detector
+    param_info = detect_parameter_from_query(query, params, llm_client) if llm_client else None
     if not param_info:
         return {
             'success': False,
-            'message': 'Could not identify parameter to analyze. Try specifying a plant or market name.'
+            'message': 'Could not identify parameter to analyze. Try specifying an entity name (e.g., "sensitivity on Plant North capacity")'
         }
 
-    param_type, entity = param_info
-    current_value = params.get(param_type, {}).get(entity, 0)
+    param_type = param_info['parameter_name']
+    entity = param_info['entity']
+    current_value = param_info['current_value']
     current_cost = solution.get('objective_value') or solution.get('objective_thousand_usd') or 0
 
     # Define test range
@@ -89,9 +71,9 @@ def perform_sensitivity_analysis(
         test_params = copy.deepcopy(params)
         test_params[param_type][entity] = test_val
 
-        # Check feasibility
+        # Check feasibility using generic instance builder
         from feasibility.core import check_feasibility, FeasStatus
-        test_instance = _create_instance_for_feasibility(test_params)
+        test_instance = build_instance_from_params(test_params, problem_type, solver_id)
 
         feas_check = check_feasibility(test_instance)
         if feas_check.status == FeasStatus.FEASIBLE:
@@ -197,20 +179,3 @@ def format_sensitivity_results(results: Dict[str, Any]) -> str:
     return "\n".join(output)
 
 
-def _create_instance_for_feasibility(params: Dict[str, Any]) -> Dict[str, Any]:
-    """Helper to create instance dict for feasibility checking."""
-    return {
-        'problem_type': 'TRANSPORTATION',
-        'solver_id': 'transport_basic_bipartite',
-        'sets': {
-            'I_plants': params.get('plants', []),
-            'J_markets': params.get('markets', [])
-        },
-        'params': {
-            'supply': params.get('capacity', {}),
-            'demand': params.get('demand', {}),
-            'cost': {(plant, market): cost
-                     for plant, markets in params.get('cost', {}).items()
-                     for market, cost in markets.items()}
-        }
-    }

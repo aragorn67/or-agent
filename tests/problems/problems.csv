@@ -1,0 +1,430 @@
+problem_id,name,description,category,expected_type,feasible,solvable,solver_id,confidence_level,source,expected_objective_value,expected_objective_sense,graph_signature,industry,num_entities,notes
+transport/wine_eu/001,european_wine_distribution,"A European wine distribution company operates three wineries:
+- Bordeaux (France) can produce 800 bottles per week
+- Tuscany (Italy) can produce 650 bottles per week
+- Rioja (Spain) can produce 550 bottles per week
+
+They supply four distribution centers:
+- Amsterdam needs 500 bottles per week
+- Berlin requires 450 bottles per week
+- Vienna demands 400 bottles per week
+- Prague needs 350 bottles per week
+
+Transportation costs (€ per bottle):
+Bordeaux to Amsterdam: 2.50, Berlin: 3.20, Vienna: 4.10, Prague: 3.80
+Tuscany to Amsterdam: 4.50, Berlin: 3.80, Vienna: 2.20, Prague: 2.90
+Rioja to Amsterdam: 3.80, Berlin: 4.20, Vienna: 3.50, Prague: 3.20
+
+Minimize the total transportation cost while meeting all demand.",transportation,transportation,true,true,transport_basic_bipartite,gold,manual,,,bipartite_supply_demand,,7,FIXED: Changed note from 'balanced' to unbalanced (Supply=2000 > Demand=1700)
+transport/food_retail/001,fresh_food_distribution,"This is a direct bipartite transportation problem with no intermediate hubs.
+
+A national grocery chain distributes perishable goods from 3 regional warehouses
+(London, Manchester, Bristol) to 5 city stores. Each warehouse has daily capacity (tons) and
+each store daily demand (tons). Costs (£/ton) are known.
+Find a transport plan minimizing total cost while meeting all store demands
+without exceeding warehouse capacity.",transportation,transportation,true,true,transport_basic_bipartite,gold,manual,,,bipartite_supply_demand,retail_food,8,Realistic perishable distribution network.
+transport/steel_construction/001,steel_supply_construction,"This is a bipartite shipping problem: mills ship directly to construction sites with no intermediate nodes.
+
+Two steel mills (Sheffield, Glasgow) supply five major construction projects.
+Each mill has weekly output limits and each project requires specified steel tonnage.
+Transport costs (£/ton) depend on distance.
+Decide shipping quantities to minimize total cost while meeting all demands.",transportation,transportation,true,true,transport_basic_bipartite,gold,manual,,,bipartite_supply_demand,construction_materials,7,Steel logistics example; good for unbalanced transport detection.
+transport/pharma_coldchain/001,vaccine_cold_chain,"This is a multi-stage network flow problem with intermediate transshipment nodes.
+
+A pharmaceutical company distributes temperature-sensitive vaccines from one national depot
+to 4 hospital clusters through 2 intermediate cold hubs.
+Hub capacities and transport costs (€/vial) are known.
+Flow must be conserved at each hub (incoming = outgoing within capacity).
+Decide shipment quantities along each route to minimize cost
+while respecting hub capacities and fulfilling hospital demand.",transportation,min_cost_flow,true,false,none,gold,manual,,,directed_network_with_transshipment,pharmaceutical,,Realistic multi-stage min-cost flow in pharma cold-chain logistics.
+transport/us_mfg/001,us_manufacturing_distribution,"This is a direct bipartite shipping problem with no intermediate nodes or hubs.
+
+Sources: Seattle (capacity 350 units), Denver (capacity 200 units), and Detroit (capacity 150 units).
+Sinks: Chicago (demand 250 units), New York (demand 180 units), and Atlanta (demand 270 units).
+
+Goods ship directly from sources to sinks.
+
+Costs (USD per unit):
+Seattle→Chicago: 2, Seattle→New York: 4, Seattle→Atlanta: 5
+Denver→Chicago: 3, Denver→New York: 6, Denver→Atlanta: 2
+Detroit→Chicago: 5, Detroit→New York: 3, Detroit→Atlanta: 4
+
+Minimize total shipping cost.",transportation,transportation,true,true,transport_basic_bipartite,gold,manual,,,bipartite_supply_demand,,6,Perfectly balanced 3×3 transportation problem
+transport/greece/001,greek_production_sites,"A company operates two production sites in Greece: Athens and Thessaloniki.
+Athens can make up to 120 units per week, Thessaloniki can supply 200 units per week.
+They deliver products to three customer areas: Patras, Larisa, and Heraklion.
+Patras requires 100 units, Larisa needs 80 units, Heraklion has a demand of 110 units.
+Transport costs (EUR per unit):
+From Athens to Patras: 5, From Athens to Larisa: 4, From Athens to Heraklion: 7
+From Thessaloniki to Patras: 6, From Thessaloniki to Larisa: 3, From Thessaloniki to Heraklion: 8
+Find the cheapest shipping plan.",transportation,transportation,true,true,transport_basic_bipartite,gold,manual,,,bipartite_supply_demand,,5,Unbalanced: supply 320 > demand 290
+transport/renewables/001,renewable_energy_allocation,"A national grid operator must allocate renewable energy from wind farms and solar parks to cities.
+
+Supply:
+- Wind Farm North: up to 120 MWh per day
+- Wind Farm Coast: up to 90 MWh per day
+- Solar Park East: up to 70 MWh per day
+
+Demand:
+- City A: requires 80 MWh per day
+- City B: requires 60 MWh per day
+- City C: requires 50 MWh per day
+- City D: requires 40 MWh per day
+
+Transmission loss (equivalent cost) in MWh per unit of energy delivered:
+- Wind Farm North → City A: 0.05, City B: 0.10, City C: 0.08, City D: 0.12
+- Wind Farm Coast → City A: 0.07, City B: 0.06, City C: 0.09, City D: 0.10
+- Solar Park East → City A: 0.09, City B: 0.08, City C: 0.04, City D: 0.06
+
+Decide how much energy to send from each renewable source to each city to minimise total effective loss, while meeting all city demands and not exceeding farm capacities.",transportation,transportation,true,true,transport_basic_bipartite,gold,manual,,,bipartite_supply_demand,,7,Clean bipartite transportation formulated in terms of losses instead of costs; tests structure-not-keywords classification.
+transport/ecommerce/001,ecommerce_fulfilment_centres,"An e-commerce company ships parcels from 3 fulfilment centres to 4 metro areas.
+
+Daily shipping capacity:
+- FC North: 2,000 parcels/day
+- FC South: 1,500 parcels/day
+- FC Central: 1,800 parcels/day
+
+Expected demand (parcels/day):
+- Metro West: 1,200
+- Metro East: 900
+- Metro North: 800
+- Metro South: 1,000
+
+Each centre–metro pair has an average shipping cost (€/parcel) and a service level (not explicitly modelled).
+
+The company wants to minimise total shipping cost, while guaranteeing that each metro area is fully served from some combination of centres and that no centre exceeds its capacity.
+
+Formulate and solve this as a transportation problem.",transportation,transportation,true,true,transport_basic_bipartite,gold,manual,,,bipartite_supply_demand,,7,Another pure bipartite transport; text mentions service levels but structure is clean transportation.
+transport/hub_network/001,two_echelon_hub_network,"A logistics provider ships pallets from 2 plants to 3 retail regions through 2 intermediate hubs.
+
+Supply:
+- Plant P1: up to 150 pallets/day
+- Plant P2: up to 180 pallets/day
+
+Intermediate hubs:
+- Hub H1: can process at most 200 pallets/day
+- Hub H2: can process at most 180 pallets/day
+
+Demand (pallets/day):
+- Region R1: 120
+- Region R2: 110
+- Region R3: 80
+
+Arcs exist only along the following directed routes:
+- P1 → H1, P1 → H2
+- P2 → H1, P2 → H2
+- H1 → R1, H1 → R2, H1 → R3
+- H2 → R1, H2 → R2, H2 → R3
+
+Each arc has a shipping cost (€/pallet) and a capacity (pallets/day).
+Flow must be conserved at hubs (incoming pallets = outgoing pallets, within hub capacity).
+
+Decide pallet flows on each arc to meet all regional demands at minimum total cost.",transportation,min_cost_flow,true,false,none,gold,manual,,,directed_network_with_transshipment,,,Structurally min-cost flow: explicit transshipment nodes (hubs) and network flow conservation. Should NOT be classified as 'transportation'.
+transport/infeasible_struct/001,infeasible_transport_struct_mismatched_costs,"A company ships goods from 2 factories (F1, F2) to 3 regional warehouses (W1, W2, W3).
+
+Weekly capacities:
+- F1 can ship up to 80 tons
+- F2 can ship up to -60 tons (ERROR: negative capacity)
+
+Weekly demands:
+- W1 needs 40 tons
+- W2 needs 50 tons
+- W3 needs 30 tons
+
+Transportation costs (£/ton):
+From F1 to W1: 10, W2: 12, W3: 15
+From F2 to W1: 11, W2: 13, W3: 14
+
+Find a minimum-cost shipping plan that satisfies all warehouse demand without exceeding factory capacities.",transportation,transportation,false,false,transport_basic_bipartite,gold,manual,,,bipartite_supply_demand,,5,LAYER 0: Structurally inconsistent description: 2 factories × 3 warehouses but only 2×2 costs given. A good structural check should flag dimension mismatch / missing cost entries before building the model.
+transport/infeasible_aggregate/001,infeasible_transport_supply_less_than_demand,"A fertilizer producer ships product from 2 plants to 3 agricultural distribution centres.
+
+Weekly plant capacities:
+- Plant North: 40 tonnes
+- Plant South: 30 tonnes
+
+Weekly distribution centre demands:
+- Centre A: 35 tonnes
+- Centre B: 25 tonnes
+- Centre C: 20 tonnes
+
+Transport costs (€/tonne):
+Plant North → Centre A: 10, Centre B: 8, Centre C: 12
+Plant South → Centre A: 9, Centre B: 11, Centre C: 7
+
+Determine the shipping quantities from each plant to each centre to minimise total transport cost while meeting all distribution centre demands and not exceeding plant capacities.",transportation,transportation,false,false,transport_basic_bipartite,gold,manual,,,bipartite_supply_demand,,5,LAYER 1: Analytic infeasibility: total supply (40+30=70) is strictly less than total demand (35+25+20=80). A problem-specific aggregate check on supply vs demand should reject this before calling the solver.
+transport/infeasible_network/001,infeasible_transport_capacity_pattern,"Three factories (F1, F2, F3) deliver components to three assembly plants (A, B, C).
+
+Weekly factory supplies:
+- F1: up to 60 units
+- F2: up to 60 units
+- F3: up to 30 units
+
+Weekly assembly plant demands:
+- Plant A: 50 units
+- Plant B: 50 units
+- Plant C: 50 units
+
+All routes exist, but some lanes are capacity-limited:
+
+Maximum shipping capacities per week (units):
+- From F1 to A: 50, to B: 50, to C: 0
+- From F2 to A: 0,  to B: 10, to C: 60
+- From F3 to A: 10, to B: 10, to C: 10
+
+Transport costs ($/unit) are defined for every existing route (values not important here).
+
+Find a shipping plan that meets all assembly plant demands without exceeding factory supplies or lane capacities and minimises total transport cost.",transportation,transportation,false,false,transport_basic_bipartite,gold,manual,,,bipartite_supply_demand,,6,"LAYER 2: Feasible in aggregates and simple checks but infeasible under full capacity constraints. Total supply = total demand = 150. Each plant's demand appears supportable by incoming lane capacities individually, but coupling with factory supplies makes the system infeasible. For example, Plant B needs 50 units but can receive at most 50 in total (F1→B up to 50, F2→B up to 10, F3→B up to 10). Plant C must get 50 units entirely from F2 and F3, but then there is insufficient F2 capacity left to help cover B while respecting factory supply limits. This should pass simple aggregate checks and be caught only by the solver-based feasibility LP."
+sched/chem_batch/001,chemical_batch_production,"This is a single-stage scheduling problem: each order has exactly ONE operation.
+
+A chemical plant needs to schedule 3 production orders on 2 batch reactors.
+
+Orders and processing requirements:
+- Order A: 2 hours on Reactor 1 OR 3 hours on Reactor 2, due by hour 10
+- Order B: 1.5 hours on Reactor 1 only, due by hour 8
+- Order C: 2.5 hours on Reactor 2 only, due by hour 12
+
+Each order is processed once on one reactor (no operation sequences).
+
+Changeover times between orders on the same reactor:
+Reactor 1: A→B takes 0.5 hours, B→A takes 0.5 hours
+Reactor 2: A→C takes 0.3 hours, C→A takes 0.4 hours
+
+Minimize the total makespan while meeting all due dates.",scheduling,single_stage_scheduling,true,true,single_stage_ipm_scheduling,gold,manual,,,,,,CLARIFIED: Each order goes to ONE reactor (single operation). 'OR' makes it clear.
+sched/ecommerce/001,warehouse_order_picking,"An e-commerce warehouse operates one picking line that can process one batch at a time.
+10 orders must be processed with known picking times and shipping deadlines.
+Each order's lateness incurs penalty cost (£/min).
+Decide the order sequence to minimize total weighted tardiness.",scheduling,single_machine_tardiness,true,false,single_stage_ipm_scheduling,gold,manual,,,,ecommerce_logistics,,Weighted tardiness scheduling from online-retail fulfilment. NOT SOLVABLE: single_stage_ipm solver lacks weighted tardiness objective.
+sched/semiconductor/001,wafer_processing_single_stage,"A semiconductor fab schedules 6 wafer lots on a single photolithography machine.
+Each lot requires a setup time dependent on the previous lot's photoresist type.
+The goal is to minimize total completion time (makespan).",scheduling,single_machine_makespan,true,true,none,gold,manual,,,,semiconductor,,Real industrial scheduling with setup-time dependency. SOLVABLE: single_stage_ipm solver supports makespan objective.
+sched/pharma_packaging/001,pharmaceutical_packaging_line,"A drug manufacturer packages 8 different medicines on one automated line.
+Each product requires a fixed processing time and must finish before its delivery due time.
+The objective is to minimize the maximum lateness (Lmax).",scheduling,single_machine_tardiness,true,false,single_stage_ipm_scheduling,gold,manual,,,,pharmaceutical,,Classic single-machine Lmax problem in pharma packaging operations. NOT SOLVABLE: single_stage_ipm solver lacks maximum lateness objective.
+sched/packaging/001,bottling_line_parallel_machines,"This is a parallel machine scheduling problem with 3 identical machines.
+
+A beverage company must schedule 5 bottling orders on 3 identical filling lines.
+
+Orders:
+- Order A: processing time 3 hours on any line, due by hour 12
+- Order B: processing time 4 hours on any line, due by hour 10
+- Order C: processing time 2 hours on any line, due by hour 8
+- Order D: processing time 5 hours on any line, due by hour 16
+- Order E: processing time 3 hours on any line, due by hour 14
+
+All orders require exactly one processing operation on exactly one line (no further stages).
+Lines can process at most one order at a time.
+
+There are small sequence-dependent changeover times between orders on the same line (e.g. switching flavour requires rinsing), but routing is trivial: each order only visits one line.
+
+Decide assignment of orders to lines and the processing sequence on each line to minimise the maximum completion time (makespan).",scheduling,parallel_machine_scheduling,true,true,none,gold,manual,,,,,,Pure single-stage parallel-machine scheduling; should map to single_stage_ipm_scheduling solver.
+sched/flowshop/001,two_machine_flow_shop,"A small factory processes 4 jobs through 2 machines in the same fixed sequence (flow shop).
+
+Processing times (hours):
+Job 1: M1 = 2, M2 = 3
+Job 2: M1 = 4, M2 = 1
+Job 3: M1 = 3, M2 = 2
+Job 4: M1 = 1, M2 = 4
+
+Each job must be processed on M1 before it starts on M2.
+Machines can handle at most one job at a time.
+No preemption is allowed.
+
+Decide the processing sequence of the jobs (same order on both machines) to minimise the total makespan.",scheduling,flow_shop,true,false,none,gold,manual,,,,,,Textbook two-machine flow shop; should be classified as flow_shop and mapped to solver_id='none'.
+sched/pcb/001,pcb_assembly_scheduling,"A PCB assembly facility has 3 production lines. Schedule 4 orders:
+- Order 1: needs Line A (3 hours) AND Line B (2 hours), due hour 15
+- Order 2: needs Line A (2.5 hours) only, due hour 12
+- Order 3: needs Line B (4 hours) AND Line C (1.5 hours), due hour 18
+- Order 4: needs Line C (3 hours) only, due hour 14
+
+Processing order is flexible (orders can visit machines in any sequence).
+
+Changeover between orders (hours):
+Line A: Order 1→2: 0.5, Order 2→1: 0.4
+Line B: Order 1→3: 0.6, Order 3→1: 0.5
+Line C: Order 3→4: 0.3, Order 4→3: 0.3
+
+Minimize total completion time.",scheduling,open_shop,true,false,none,gold,manual,,,,,,"FIXED: Changed from single_stage to open_shop (multiple operations, flexible order)"
+sched/jobshop/001,job_shop_manufacturing,"A machine shop has 3 machines (M1, M2, M3). Schedule 3 jobs:
+Job 1: M1 (2h) → M2 (3h) → M3 (1h)
+Job 2: M2 (2h) → M1 (4h) → M3 (2h)
+Job 3: M1 (3h) → M3 (2h) → M2 (1h)
+
+Each job must visit machines in the specified order.
+Minimize total makespan.",scheduling,job_shop,true,false,none,gold,manual,,,,,,Multi-stage with precedence - NOT solvable by current system
+sched/nurse/001,nurse_shift_rostering,"A hospital needs to schedule 8 nurses across 3 shifts (morning, evening, night) for 7 days.
+Requirements:
+- Each shift needs 2-3 nurses
+- Each nurse works max 5 shifts per week
+- No nurse works consecutive night shifts
+- Fair distribution of weekend shifts
+
+Minimize schedule cost while meeting coverage requirements.",scheduling,shift_rostering,true,false,none,gold,manual,,,,,,Employee scheduling - NOT solvable by current system
+sched/single_machine/001,single_machine_tardiness,"Schedule 5 jobs on a single machine to minimize total tardiness.
+Jobs with processing times (p_j) and due dates (d_j):
+- Job 1: p=4, d=8
+- Job 2: p=3, d=6
+- Job 3: p=5, d=12
+- Job 4: p=2, d=5
+- Job 5: p=6, d=15
+
+Tardiness T_j = max(0, C_j - d_j) where C_j is completion time.
+Minimize sum of T_j (total tardiness).",scheduling,single_machine_tardiness,true,false,single_stage_ipm_scheduling,gold,manual,,,,,,Classic 1||∑T_j problem for testing classification
+assign/worker_task/001,worker_task_assignment,"Assign 4 workers to 4 tasks (one-to-one assignment).
+Cost matrix (hours required):
+- Worker A: Task 1=3h, Task 2=5h, Task 3=4h, Task 4=6h
+- Worker B: Task 1=4h, Task 2=3h, Task 3=5h, Task 4=4h
+- Worker C: Task 1=5h, Task 2=4h, Task 3=3h, Task 4=5h
+- Worker D: Task 1=6h, Task 2=5h, Task 3=4h, Task 4=3h
+
+Minimize total time required.",assignment,assignment,true,false,none,gold,manual,,,,,,Classic assignment problem - solver not yet implemented
+assign/sales/001,sales_territory_assignment,"Assign 5 salespeople to 5 territories.
+Expected monthly revenue (kUSD):
+- Alice: North=45, South=38, East=52, West=41, Central=48
+- Bob: North=42, South=46, East=39, West=50, Central=44
+- Carol: North=50, South=40, East=48, West=43, Central=47
+- David: North=38, South=52, East=41, West=49, Central=40
+- Emma: North=46, South=43, East=50, West=44, Central=51
+
+Maximize total monthly revenue.",assignment,assignment,true,false,none,gold,manual,,,,,,Maximization assignment - solver not yet implemented
+knapsack/project/001,project_selection_budget,"A company has a 500 kUSD budget for new projects. Select which projects to fund:
+- Project A: Cost 180 kUSD, Expected return 250 kUSD
+- Project B: Cost 220 kUSD, Expected return 300 kUSD
+- Project C: Cost 150 kUSD, Expected return 200 kUSD
+- Project D: Cost 120 kUSD, Expected return 160 kUSD
+- Project E: Cost 200 kUSD, Expected return 280 kUSD
+
+Projects are all-or-nothing (cannot partially fund).
+Maximize total expected return within budget.",knapsack,zero_one_knapsack,true,false,none,gold,manual,,,,,,0/1 knapsack - solver not yet implemented
+knapsack/cargo/001,cargo_loading_optimization,"A cargo ship has 50 tonnes capacity. Select items to load:
+- Item 1: 10 tonnes, value 8 kUSD
+- Item 2: 15 tonnes, value 12 kUSD
+- Item 3: 8 tonnes, value 7 kUSD
+- Item 4: 12 tonnes, value 9.5 kUSD
+- Item 5: 20 tonnes, value 15 kUSD
+- Item 6: 6 tonnes, value 5.5 kUSD
+
+Maximize total cargo value without exceeding capacity.",knapsack,zero_one_knapsack,true,false,none,gold,manual,,,,,,Weight-constrained knapsack
+netflow/pipeline/001,oil_pipeline_max_flow,"An oil pipeline network has nodes (wells, pumping stations, refineries).
+Find maximum flow from source to sink:
+
+Network structure:
+- Source S connects to: A (capacity 20), B (capacity 15)
+- A connects to: C (capacity 12), D (capacity 8)
+- B connects to: C (capacity 10), E (capacity 7)
+- C connects to: Sink T (capacity 15)
+- D connects to: T (capacity 10)
+- E connects to: T (capacity 8)
+
+What is the maximum oil flow (barrels/hour) from S to T?",network_flow,max_flow,true,false,none,gold,manual,,,,,,Max flow problem - solver not yet implemented
+netflow/shortest/001,shortest_delivery_route,"Find shortest delivery route from warehouse to customer:
+Network distances (km):
+- Warehouse to A: 5
+- Warehouse to B: 8
+- A to C: 3
+- A to D: 7
+- B to C: 4
+- B to D: 2
+- C to Customer: 6
+- D to Customer: 5
+
+What is the shortest path from Warehouse to Customer?",network_flow,shortest_path,true,false,none,gold,manual,,,,,,Shortest path - solver not yet implemented
+prod/lotsizing/001,lot_sizing_multi_period,"A factory produces widgets over 4 months. Plan production to minimize costs:
+
+Monthly demand: Month 1=100, Month 2=150, Month 3=120, Month 4=180
+Production capacity: 200 units/month
+Production cost: 50 USD/unit
+Holding cost: 5 USD/unit/month
+Setup cost (if produce anything): 1000 USD/month
+
+Can hold inventory between months (starting inventory = 0, ending ≥ 0).
+Minimize total production + holding + setup costs.",production_planning,lot_sizing,true,false,none,gold,manual,,,,,,Multi-period production planning - solver not yet implemented
+prod/aggregate/001,aggregate_production_planning,"A manufacturer produces 3 products over 6 months. Plan production:
+
+Products: A, B, C
+Demand (units/month):
+- Product A: [100, 120, 110, 130, 140, 120]
+- Product B: [80, 90, 100, 85, 95, 90]
+- Product C: [60, 70, 65, 75, 70, 80]
+
+Constraints:
+- Monthly labor hours: 2000
+- Product A: 2h/unit, Product B: 3h/unit, Product C: 1.5h/unit
+- Can use overtime (max 400h/month at 1.5× cost)
+- Inventory holding costs apply
+
+Minimize total production + overtime + inventory costs.",production_planning,production_planning,true,false,none,gold,manual,,,,,,Multi-product aggregate planning - solver not yet implemented
+loc/ufl/001,small_uncapacitated_facility_location,"Open from 4 candidate facilities to serve 6 customers. Each facility has a fixed opening cost and variable shipping costs.
+
+Facilities with opening costs (kEUR):
+- F1: 100 kEUR, F2: 120 kEUR, F3: 90 kEUR, F4: 110 kEUR
+
+Shipping costs (EUR/unit):
+- F1 to customers: [5, 8, 6, 9, 7, 4]
+- F2 to customers: [7, 4, 8, 5, 6, 9]
+- F3 to customers: [6, 7, 5, 8, 4, 7]
+- F4 to customers: [8, 6, 7, 4, 9, 5]
+
+Customer demands (units): [100, 150, 120, 180, 90, 140]
+
+Minimize total opening cost + shipping cost.",facility_location,uncapacitated_facility_location,true,false,none,gold,manual,,,,,,Baseline UFL for classification testing
+vrp/cvrp/001,cvrp_small_depot,"Single depot, 5 customers with demands (kg). Vehicles capacity 100 kg, unlimited vehicles available.
+
+Customer demands (kg): [30, 40, 25, 35, 45]
+Distances from depot (km): [10, 15, 8, 12, 18]
+Inter-customer distances (km matrix):
+    C1  C2  C3  C4  C5
+C1  0   12  8   10  14
+C2  12  0   9   11  8
+C3  8   9   0   7   13
+C4  10  11  7   0   9
+C5  14  8   13  9   0
+
+Minimize total distance traveled.",vehicle_routing,cvrp,true,false,none,gold,manual,,,,,,Capacity only; good for label check
+set/cover/001,minimal_sensor_placement,"Choose the minimum number of sensors to cover all zones; each sensor covers a subset of zones.
+
+Sensors and their coverage:
+- Sensor 1: covers zones {A, B, C}
+- Sensor 2: covers zones {B, D, E}
+- Sensor 3: covers zones {A, C, F}
+- Sensor 4: covers zones {D, E, F}
+- Sensor 5: covers zones {B, C, E}
+
+All zones {A, B, C, D, E, F} must be covered.
+Minimize number of sensors used.",set_cover,set_cover,true,false,none,gold,manual,,,,,,Binary cover model
+binpack/basic/001,one_dim_bin_packing,"Pack items into minimum number of bins.
+
+Item sizes: [40, 30, 25, 50, 35, 20, 45, 30, 25, 40]
+Bin capacity: 100
+
+Minimize number of bins used.",bin_packing,bin_packing,true,false,none,gold,manual,,,,,,1D bin packing - column generation candidate
+mcf/telecom/001,multicommodity_network_flow,"Route 3 commodities through a shared network.
+
+Network: 5 nodes, 8 directed arcs with capacities
+Arc capacities (shared among all commodities): {(1,2):50, (1,3):40, (2,4):45, (3,4):30, (3,5):35, (4,5):40, (2,5):25, (1,4):30}
+
+Commodities:
+- Commodity A: source=1, sink=5, demand=20
+- Commodity B: source=2, sink=5, demand=15
+- Commodity C: source=1, sink=4, demand=18
+
+Minimize total flow cost (cost=1 per unit per arc) subject to shared arc capacities.",multicommodity_flow,multicommodity_flow,true,false,none,gold,manual,,,,,,Multicommodity flow - shared arc capacities
+lpwp/prob_0,lpwp_prob_0,"A fishery wants to transport their catch. They can either use local sled dogs or trucks. Local sled dogs and trucks can take different amount of fish per trip. Also, the cost per trip for sled dogs and truck is also differs. You should note that the budget has an upper limit and the number of sled dog trips must be less than the number of truck trips. Formulate an LP to maximize the number of fish that can be transported.",TRANSPORTATION,transportation,true,false,none,bronze,ML_dataset,,minimize,,,,From ML dataset - transportation (not solvable with current solvers)
+lpwp/prob_110,lpwp_prob_110,"A patient with a sore throat can drink two syrups, syrup 1 and syrup 2 for treatment. Per serving, syrup 1 delivers 0.5 units of medicine to the throat and 0.4 units of medicine to the lungs. Per serving, syrup 2 delivers 0.2 units of medicine to the throat and 0.5 units of medicine to the lungs. Furthermore, syrup 1 contains 0.5 units of sugar while syrup 2 contains 0.3 units of sugar per serving. The patient can get at most 5 units of medicine for the throat and at least 4 units of medicine to the lungs. How many servings of each should the patient take to minimize his sugar intake?",TRANSPORTATION,transportation,true,false,none,bronze,ML_dataset,,minimize,,,,From ML dataset - transportation (not solvable with current solvers)
+lpwp/prob_120,lpwp_prob_120,"A patient can be hooked up to two machines to have medicine delivered, machine 1 and machine 2. Machine 1 delivers 0.5 units of medicine to the heart per minute and 0.8 units of medicine per minute to the brain. Machine 2 delivers 0.3 units of medicine per minute to the heart and 1 unit of medicine per minute to the brain. In addition however, machine 1 creates 0.3 units of waste per minute while machine 2 creates 0.5 units of waste per minute. If at most 8 units of medicine can be received by the heart and at least 4 units of medicine should be received by the brain, how many minutes should each machine be used to minimize the total amount of waste produced?",TRANSPORTATION,transportation,true,false,none,bronze,ML_dataset,,minimize,,,,From ML dataset - transportation (not solvable with current solvers)
+lpwp/prob_130,lpwp_prob_130,"A patient in the hospital can take two different pain killers, pain killer 1 and pain killer 2. Per dose, pain killer 1 delivers 0.5 units of medicine to the legs and 0.8 units of medicine to the back. Per dose, pain killer 2 delivers 0.7 units of medicine to the legs and 0.4 units of medicine to the back. In, addition pain killer 1 deliver 0.3 units of sleeping medicine and pain killer 2 delivers 0.6 units of sleeping medicine. At most 8 units of sleep medicine should be delivered and at least 4 units of medicine should be delivered to the legs. How many doses of each should be taken to maximize the amount of medicine delivered to the back?",TRANSPORTATION,transportation,true,false,none,bronze,ML_dataset,,minimize,,,,From ML dataset - transportation (not solvable with current solvers)
+lpwp/prob_140,lpwp_prob_140,"A patient is undergoing radiation treatment involving two beams, Beam 1 and Beam 2. Beam 1 delivers a dose of 0.3 units of medicine per minute to the benign area of the pancreas and 0.2 units of medicine per minute to the benign area of the skin. Beam 2 delivers 0.2 units of medicine per minute to the benign area of the pancreas and 0.1 units of medicine per minute to the benign area of the skin.  In addition, beam 1 delivers 0.6 units of medicine per minute to the tumor and beam 2 delivers 0.4 units of medicine per minute to the tumor. At most 4 units of medicine should be received by the skin and at least 3 units of medicine should be delivered to the tumor.  How many minutes of each beam should be used to minimize the total radiation received by the pancreas?",TRANSPORTATION,transportation,true,false,none,bronze,ML_dataset,,minimize,,,,From ML dataset - transportation (not solvable with current solvers)
+lpwp/prob_148,lpwp_prob_148,"A clinic administers two vaccines available for the public to take one at a time. One vaccine is taken as a pill and another is taken as a shot. The pill vaccine takes 10 minutes to administer while the shot takes 20 minutes to administer. Since the shot has been more thoroughly studied, the clinic must deliver at least 3 times as many shots as pill. In addition, the clinic must administer at least 30 pill vaccines. If the clinic only operates for 10000 minutes, maximize the number of patients that can be vaccinated.",TRANSPORTATION,transportation,true,false,none,bronze,ML_dataset,,minimize,,,,From ML dataset - transportation (not solvable with current solvers)
+lpwp/prob_149,lpwp_prob_149,"A chocolate company can transport their boxes of chocolate either using their own vans or by renting trucks. Their vans can transport 50 boxes per trip while a truck can transport 80 boxes per trip. Since they own their vans, the cost per van trip is $30 while the cost per truck trip is $50. The company needs to transport at least 1500 boxes of chocolate and they have a budget of $1000. Since the vans also provide advertising, the number of trips by van must be larger than the number of trips by trucks. How many of trip by each should be done to minimize the total number of trips?",TRANSPORTATION,transportation,true,false,none,bronze,ML_dataset,,minimize,,,,From ML dataset - transportation (not solvable with current solvers)
+lpwp/prob_150,lpwp_prob_150,"A bee farmer transports his honey in small and large bottles. A small bottle can take 5 units of honey while a large bottle can take 20 units of honey. The farmer has available at most 300 small bottles and at most 100 large bottles. In addition, since small bottles are easier to sell, at least twice as many small bottles must be used than large bottles. Finally, he can transport at most 200 bottles total and at least 50 must be large bottles. How many of each bottle should be use to maximize the total amount of honey he can transport?",TRANSPORTATION,transportation,true,false,none,bronze,ML_dataset,,minimize,,,,From ML dataset - transportation (not solvable with current solvers)
+lpwp/prob_151,lpwp_prob_151,"An international goods exporter uses ships and planes to transport goods. A ship can take 40 containers worth of goods and uses 500 liters of fuel per trip. A plane can take 20 containers worth of goods and uses 300 liters of fuel per trip. The company needs to transport at least 500 containers worth of goods. In addition, there can be at most 10 plane trips made and a minimum of 50% of the trips made must be by ship. How many of each trip should be made to minimize the total amount of fuel consumed?",TRANSPORTATION,transportation,true,false,none,bronze,ML_dataset,,minimize,,,,From ML dataset - transportation (not solvable with current solvers)
+lpwp/prob_152,lpwp_prob_152,"There has been an oil spill in the ocean and ducks need to be taken to shore to be cleaned either by boat or by canoe. A boat can take 10 ducks per trip while a canoe can take 8 ducks per trip. Since the boats are motor powered, they take 20 minutes per trip while the canoes take 40 minutes per trip. In order to avoid further environmental damage, there can be at most 12 boat trips and at least 60% of the trips should be by canoe. If at least 300 ducks need to be taken to shore, how many of each transportation method should be used to minimize the total amount of time needed to transport the ducks?",TRANSPORTATION,transportation,true,false,none,bronze,ML_dataset,,minimize,,,,From ML dataset - transportation (not solvable with current solvers)
+jobshop/orlib/001,job_shop_instance_orlib_1,A job shop scheduling problem with 10 jobs and 10 machines. Each job must be processed through a sequence of machines in a specific order. Jobs have the following routes: Job1: M4(88min) → M8(68min) → M6(94min) → M5(99min) → M1(67min) → M2(89min) → M9(77min) → M7(99min) → M0(86min) → M3(92min); Job2: M5(72min) → M3(50min) → M6(69min) → M4(75min) → M2(94min) → M8(66min) → M0(92min) → M1(82min) → M7(94min) → M9(63min); Job3: M9(83min) → M8(61min) → M0(83min) → M1(65min) → M6(64min) → M5(85min) → M7(78min) → M4(85min) → M2(55min) → M3(77min) and 7 more jobs. Each machine can process only one job at a time. Minimize makespan.,SCHEDULING,job_shop,true,false,none,bronze,ML_dataset,,minimize,,,20,From ML dataset - job_shop (not solvable with current solvers)
+jobshop/orlib/002,job_shop_instance_orlib_2,A job shop scheduling problem with 10 jobs and 10 machines. Each job must be processed through a sequence of machines in a specific order. Jobs have the following routes: Job1: M7(62min) → M8(24min) → M5(25min) → M3(84min) → M4(47min) → M6(38min) → M2(82min) → M0(93min) → M9(24min) → M1(66min); Job2: M5(47min) → M2(97min) → M8(92min) → M9(22min) → M1(93min) → M4(29min) → M7(56min) → M3(80min) → M0(78min) → M6(67min); Job3: M1(45min) → M7(46min) → M6(22min) → M2(26min) → M9(38min) → M0(69min) → M4(40min) → M3(33min) → M8(75min) → M5(96min) and 7 more jobs. Each machine can process only one job at a time. Minimize makespan.,SCHEDULING,job_shop,true,false,none,bronze,ML_dataset,,minimize,,,20,From ML dataset - job_shop (not solvable with current solvers)
+jobshop/orlib/003,job_shop_instance_orlib_3,A job shop scheduling problem with 20 jobs and 15 machines. Each job must be processed through a sequence of machines in a specific order. Jobs have the following routes: Job1: M2(24min) → M3(12min) → M9(17min) → M4(27min) → M0(21min) → M6(25min) → M8(27min) → M7(26min) → M1(30min) → M5(31min) → M11(18min) → M14(16min) → M13(39min) → M10(19min) → M12(26min); Job2: M6(30min) → M3(15min) → M12(20min) → M11(19min) → M1(24min) → M13(15min) → M10(28min) → M2(36min) → M5(26min) → M7(15min) → M0(11min) → M8(23min) → M14(20min) → M9(26min) → M4(28min); Job3: M6(35min) → M0(22min) → M13(23min) → M7(32min) → M2(20min) → M3(12min) → M12(19min) → M10(23min) → M9(17min) → M1(14min) → M5(16min) → M11(29min) → M8(16min) → M4(22min) → M14(22min) and 17 more jobs. Each machine can process only one job at a time. Minimize makespan.,SCHEDULING,job_shop,true,false,none,bronze,ML_dataset,,minimize,,,35,From ML dataset - job_shop (not solvable with current solvers)
+jobshop/orlib/004,job_shop_instance_orlib_4,A job shop scheduling problem with 20 jobs and 15 machines. Each job must be processed through a sequence of machines in a specific order. Jobs have the following routes: Job1: M0(19min) → M9(33min) → M2(32min) → M13(18min) → M10(39min) → M8(34min) → M6(25min) → M4(36min) → M11(40min) → M12(33min) → M1(31min) → M14(30min) → M3(34min) → M5(26min) → M7(13min); Job2: M9(11min) → M10(22min) → M14(19min) → M5(12min) → M4(25min) → M6(38min) → M0(29min) → M7(39min) → M13(19min) → M11(22min) → M1(23min) → M3(20min) → M2(40min) → M12(19min) → M8(26min); Job3: M3(25min) → M8(17min) → M11(24min) → M13(40min) → M10(32min) → M14(16min) → M5(39min) → M9(19min) → M0(24min) → M1(39min) → M4(17min) → M2(35min) → M7(38min) → M6(20min) → M12(31min) and 17 more jobs. Each machine can process only one job at a time. Minimize makespan.,SCHEDULING,job_shop,true,false,none,bronze,ML_dataset,,minimize,,,35,From ML dataset - job_shop (not solvable with current solvers)
+jobshop/orlib/005,job_shop_instance_orlib_5,A job shop scheduling problem with 20 jobs and 15 machines. Each job must be processed through a sequence of machines in a specific order. Jobs have the following routes: Job1: M6(14min) → M5(21min) → M8(13min) → M4(11min) → M1(11min) → M14(35min) → M13(20min) → M11(17min) → M10(18min) → M12(11min) → M2(23min) → M3(13min) → M0(15min) → M7(11min) → M9(35min); Job2: M1(35min) → M5(31min) → M0(13min) → M3(26min) → M6(14min) → M9(17min) → M7(38min) → M12(20min) → M10(19min) → M13(12min) → M8(16min) → M4(34min) → M11(15min) → M14(12min) → M2(14min); Job3: M0(30min) → M4(35min) → M2(40min) → M10(35min) → M6(30min) → M14(23min) → M8(29min) → M13(37min) → M7(38min) → M3(40min) → M9(26min) → M12(11min) → M1(40min) → M11(36min) → M5(17min) and 17 more jobs. Each machine can process only one job at a time. Minimize makespan.,SCHEDULING,job_shop,true,false,none,bronze,ML_dataset,,minimize,,,35,From ML dataset - job_shop (not solvable with current solvers)
+jobshop/orlib/006,job_shop_instance_orlib_6,A job shop scheduling problem with 6 jobs and 6 machines. Each job must be processed through a sequence of machines in a specific order. Jobs have the following routes: Job1: M2(1min) → M0(3min) → M1(6min) → M3(7min) → M5(3min) → M4(6min); Job2: M1(8min) → M2(5min) → M4(10min) → M5(10min) → M0(10min) → M3(4min); Job3: M2(5min) → M3(4min) → M5(8min) → M0(9min) → M1(1min) → M4(7min) and 3 more jobs. Each machine can process only one job at a time. Minimize makespan.,SCHEDULING,job_shop,true,false,none,bronze,ML_dataset,,minimize,,,12,From ML dataset - job_shop (not solvable with current solvers)
+jobshop/orlib/007,job_shop_instance_orlib_7,A job shop scheduling problem with 10 jobs and 10 machines. Each job must be processed through a sequence of machines in a specific order. Jobs have the following routes: Job1: M0(29min) → M1(78min) → M2(9min) → M3(36min) → M4(49min) → M5(11min) → M6(62min) → M7(56min) → M8(44min) → M9(21min); Job2: M0(43min) → M2(90min) → M4(75min) → M9(11min) → M3(69min) → M1(28min) → M6(46min) → M5(46min) → M7(72min) → M8(30min); Job3: M1(91min) → M0(85min) → M3(39min) → M2(74min) → M8(90min) → M5(10min) → M7(12min) → M6(89min) → M9(45min) → M4(33min) and 7 more jobs. Each machine can process only one job at a time. Minimize makespan.,SCHEDULING,job_shop,true,false,none,bronze,ML_dataset,,minimize,,,20,From ML dataset - job_shop (not solvable with current solvers)
+jobshop/orlib/008,job_shop_instance_orlib_8,A job shop scheduling problem with 20 jobs and 5 machines. Each job must be processed through a sequence of machines in a specific order. Jobs have the following routes: Job1: M0(29min) → M1(9min) → M2(49min) → M3(62min) → M4(44min); Job2: M0(43min) → M1(75min) → M3(69min) → M2(46min) → M4(72min); Job3: M1(91min) → M0(39min) → M2(90min) → M4(12min) → M3(45min) and 17 more jobs. Each machine can process only one job at a time. Minimize makespan.,SCHEDULING,job_shop,true,false,none,bronze,ML_dataset,,minimize,,,25,From ML dataset - job_shop (not solvable with current solvers)
+jobshop/orlib/009,job_shop_instance_orlib_9,A job shop scheduling problem with 10 jobs and 5 machines. Each job must be processed through a sequence of machines in a specific order. Jobs have the following routes: Job1: M1(21min) → M0(53min) → M4(95min) → M3(55min) → M2(34min); Job2: M0(21min) → M3(52min) → M4(16min) → M2(26min) → M1(71min); Job3: M3(39min) → M4(98min) → M1(42min) → M2(31min) → M0(12min) and 7 more jobs. Each machine can process only one job at a time. Minimize makespan.,SCHEDULING,job_shop,true,false,none,bronze,ML_dataset,,minimize,,,15,From ML dataset - job_shop (not solvable with current solvers)
+jobshop/orlib/010,job_shop_instance_orlib_10,A job shop scheduling problem with 10 jobs and 5 machines. Each job must be processed through a sequence of machines in a specific order. Jobs have the following routes: Job1: M0(20min) → M3(87min) → M1(31min) → M4(76min) → M2(17min); Job2: M4(25min) → M2(32min) → M0(24min) → M1(18min) → M3(81min); Job3: M1(72min) → M2(23min) → M4(28min) → M0(58min) → M3(99min) and 7 more jobs. Each machine can process only one job at a time. Minimize makespan.,SCHEDULING,job_shop,true,false,none,bronze,ML_dataset,,minimize,,,15,From ML dataset - job_shop (not solvable with current solvers)

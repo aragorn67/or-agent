@@ -380,20 +380,49 @@ Parse the user's response and return modifications."""
 
                 elif parameter in ["cost", "distance"]:
                     # Modify cost/distance for a route
-                    # Entity format: "A to B" or "A→B" or just tuple reference
+                    # Entity format: "A to B" or "A→B" or "route from A to B"
                     if parameter in modified and isinstance(modified[parameter], dict):
                         # Try to parse entity as route
                         route = self._parse_route(entity, modified.get("plants", []), modified.get("markets", []))
-                        if route and route in modified[parameter]:
-                            if mod_type == "increase":
-                                modified[parameter][route] += value
-                            elif mod_type == "decrease":
-                                modified[parameter][route] = max(0, modified[parameter][route] - value)
-                            elif mod_type == "set":
-                                modified[parameter][route] = value
-                        elif mod_type == "add" and route:
-                            # Add new route
-                            modified[parameter][route] = value
+                        if route:
+                            source, sink = route
+
+                            # Handle BOTH nested dict {i: {j: cost}} AND flat dict {(i,j): cost}
+                            # Check if nested format
+                            if source in modified[parameter] and isinstance(modified[parameter][source], dict):
+                                # Nested format: modified["cost"]["Bordeaux"]["Amsterdam"]
+                                if sink in modified[parameter][source]:
+                                    current_value = modified[parameter][source][sink]
+                                    if mod_type == "increase":
+                                        modified[parameter][source][sink] = current_value + value
+                                    elif mod_type == "decrease":
+                                        modified[parameter][source][sink] = max(0, current_value - value)
+                                    elif mod_type == "set":
+                                        modified[parameter][source][sink] = value
+                                elif mod_type in ["add", "set"]:
+                                    # Add new route in nested format
+                                    modified[parameter][source][sink] = value
+
+                            # Check if flat format
+                            elif route in modified[parameter]:
+                                # Flat format: modified["cost"][("Bordeaux", "Amsterdam")]
+                                if mod_type == "increase":
+                                    modified[parameter][route] += value
+                                elif mod_type == "decrease":
+                                    modified[parameter][route] = max(0, modified[parameter][route] - value)
+                                elif mod_type == "set":
+                                    modified[parameter][route] = value
+
+                            elif mod_type in ["add", "set"]:
+                                # Add new route - try nested format first
+                                if source in modified[parameter]:
+                                    if not isinstance(modified[parameter][source], dict):
+                                        # Convert to nested if needed
+                                        modified[parameter][source] = {}
+                                    modified[parameter][source][sink] = value
+                                else:
+                                    # Create nested structure
+                                    modified[parameter][source] = {sink: value}
 
             except Exception as e:
                 # If modification fails, skip it silently
