@@ -49,3 +49,6 @@ knowledge/
 ML_RAG_archive/ML_approaches/RAG/papers/*.pdf
 ML_RAG_archive/ML_approaches/RAG/vectorstore/
 ML_RAG_archive/ML_approaches/RAG/papers/
+
+# Generated eval outputs
+evals/results/

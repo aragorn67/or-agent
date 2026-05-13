@@ -410,3 +410,244 @@ heuristics/
 ---
 
 **Next Steps**: Start with Priority 1 (Data Layer) - create `data/loaders/csv_loader.py` and test with real supply chain CSV files.
+
+---
+
+# 🧪 Round-Trip Evaluation Plan (Added 2026-05-12)
+
+## The wall we hit
+
+The reason work paused on this project was not the data layer — it was **evaluation**. We could not measure whether a change to a prompt, model, or pipeline stage made the system better or worse. The only ground truth we had was 27 hand-curated problems in `tests/or_problem_repository.py`; that's too small to detect anything but huge regressions, and hand-writing more problems with full ground truth (classification + extracted params + optimal objective) does not scale.
+
+## The idea: generate ground truth, don't curate it
+
+Run the pipeline backwards. Start from params with a known optimum, verbalize them into natural language with an LLM, push the description through the agent, and check whether the agent recovers the same params (and same objective) we started with. No human labeling. Unlimited test cases. Closes the loop end-to-end.
+
+```
+generate_params(seed)
+        │
+        ▼
+true_objective ◄─── solve(params)          ← ground truth, by construction
+        │
+        ▼
+problem_text ◄────── verbalize(params)     ← LLM rephrases params as a problem
+        │
+        ▼
+agent.solve_natural_language(problem_text)
+        │
+        ▼
+{recovered_classification, recovered_params, recovered_objective}
+        │
+        ▼
+compare ──► metrics: classification match, param recall, |Δ objective| / true_objective
+```
+
+## Scope (Phase 1 only — 1 day of work)
+
+- **Transportation problems only** for the first cut. Scheduling extends naturally.
+- **Bounded problem sizes**: 2–5 plants × 2–6 markets, capacities in [50, 1000], demands satisfying total ≤ total supply.
+- **N = 100 generated problems** for the first run. Cheap enough to iterate, big enough to get sub-5% confidence intervals.
+
+## Files to add (no edits to existing modules)
+
+```
+evals/
+├── __init__.py
+├── generators/
+│   ├── __init__.py
+│   ├── transport_generator.py    # produces feasible transportation param dicts
+│   └── scheduling_generator.py   # Phase 2
+├── verbalizer.py                 # params dict → natural-language problem text via LLM
+├── round_trip.py                 # orchestrates one round-trip cycle
+├── comparators.py                # param semantic-diff + objective-gap helpers
+├── run_eval.py                   # CLI entry: `python -m evals.run_eval --n 100 --domain transport`
+└── README.md                     # how to run, how to read results
+```
+
+## Component contracts
+
+**`transport_generator.generate(seed) -> dict`**
+- Returns a valid params dict the bipartite solver accepts (`plants`, `markets`, `capacity`, `demand`, `cost`).
+- Guaranteed feasible (total supply ≥ total demand, all costs non-negative, every market reachable).
+- Deterministic given seed (for reproducibility).
+
+**`verbalizer.verbalize(params, style='neutral') -> str`**
+- One LLM call (uses `EnhancedLLMClient` reasoning model).
+- Returns a natural-language problem statement that *does not* leak structure (no JSON, no key names).
+- `style` knob: `'neutral'`, `'formal'`, `'casual'`, `'noisy'` (with redundant info) — to test robustness later.
+
+**`round_trip.run_one(seed, agent) -> RoundTripResult`**
+- Returns dataclass with: `generated_params`, `true_objective`, `verbalized_text`, `recovered_classification`, `recovered_params`, `recovered_objective`, `param_recall`, `objective_gap`, `stage_latencies`, `error`.
+
+**`comparators.param_recall(generated, recovered) -> float`**
+- For each top-level key in generated (`plants`, `markets`, `capacity`, `demand`, `cost`), compute element-wise match within tolerance.
+- Returns a single 0–1 score plus a per-key breakdown.
+
+**`comparators.objective_gap(true_obj, recovered_obj) -> float`**
+- `|true - recovered| / max(|true|, 1e-9)`. The headline metric.
+
+## Reported metrics
+
+- **Classification accuracy**: % of runs where `recovered_classification == 'TRANSPORTATION'`
+- **Param recall**: mean per-key recall across runs, plus distribution
+- **Objective gap**: median + 95th percentile of `|Δobj| / true_obj`
+- **End-to-end pass rate**: % of runs where objective gap < 1%
+- **Stage latency**: ms per (classify, extract, solve, explain)
+- **Failure histogram**: counts of {JSON parse fail, classification miss, infeasibility, solver error, objective mismatch}
+
+## Phase plan
+
+- **Phase 1 (1 day)** — transport generator + verbalizer + round-trip + run on N=100. Land headline numbers.
+- **Phase 2 (0.5 day)** — scheduling generator + classifier check. Re-run combined eval.
+- **Phase 3 (0.5 day)** — metamorphic transforms layered on the eval (`double all costs → objective doubles`, `permute plant order → objective unchanged`, `add unused plant → objective unchanged`). Adds invariant assertions without new ground truth.
+- **Phase 4 (later)** — paraphrase the 27-problem seed set 10x via LLM, run pipeline on paraphrases, treat the original 27 as a human-curated holdout to spot the synthetic-vs-real gap.
+
+## Known risks / open questions
+
+- **LLM verbalization cost.** 100 round-trips ≈ 100 verbalize calls + 100 pipeline runs. With local Ollama at ~30s/pipeline, Phase 1 takes ~1 hr wall clock. Tolerable; cache verbalizations on disk by seed.
+- **Generator realism.** Random uniform params produce toy problems that the system may handle better than real user inputs do. Mitigation: keep the 27-problem seed set as a held-out human benchmark. **Report both numbers — synthetic and seed — every time.**
+- **Verbalizer leaking structure.** If the LLM verbalizer outputs JSON-like text, the extractor will look better than it actually is. Mitigation: assertion in `verbalizer.verbalize` that strips obvious structural cues (curly braces, key names, colons before numbers).
+- **Feasibility-gated generation.** If a generated instance is infeasible at the solver step, drop it before round-tripping — those teach nothing about extraction quality.
+- **Determinism vs. coverage.** Seeded RNG buys reproducibility but a fixed seed list will keep finding the same failure modes. Plan: 50% fixed seeds (regression set) + 50% rotating (exploration).
+
+## What we are *not* doing yet
+
+- Multi-stage / job-shop scheduling generation. Out of scope until the solver supports it.
+- LLM-as-judge for explanation quality. Separate problem; not gated by this eval.
+- Real CSV / Excel inputs (that's the Data Layer priority above, independent track).
+- Fine-tuning anything. The point of the eval is to give us a number we can move; no model changes until we can measure.
+
+## Definition of done for Phase 1
+
+- `python -m evals.run_eval --n 100 --domain transport` runs end-to-end and produces a JSON report at `evals/results/transport_<timestamp>.json`.
+- Report contains the six headline metrics listed above.
+- At least one metric reveals a real issue (e.g., the JSON-parse-fail histogram bucket is non-zero) — i.e., the eval is sensitive enough to find bugs.
+- Result reproducible across runs given the same seed list.
+
+---
+
+# 📌 TODO (next after eval): Deploy a public REST API behind Cloudflare (Added 2026-05-13)
+
+## Why this exists
+
+The project needs to be visible at a URL for CV purposes. "Local GitHub repo" vs. "deployed REST API with N endpoints" is a meaningfully different signal for an AI-Specialist role; a reviewer with OR / ML hiring eyes will register the difference immediately. Goal is **a URL that exists**, not production-grade — weekend scope.
+
+This goes ahead of the heuristic/warm-start TODO below. Heuristics are a research contribution; deployment is a recruiting artifact. Order: eval → deploy → heuristics.
+
+## Scope (intentionally small)
+
+- One public endpoint exposing the existing `OptimizationAgent.solve_natural_language` pipeline.
+- One demo page / one curl example so the URL is meaningful when opened.
+- Cloudflare in front for DNS + TLS + a free DDoS shield. No Cloudflare Workers (the pipeline needs Pyomo + GLPK + an LLM backend; Workers can't run any of that).
+- Not in scope: auth, rate limiting beyond Cloudflare defaults, persistence, observability beyond basic logs.
+
+## Architecture
+
+```
+user → Cloudflare DNS/TLS → VPS (small box) → FastAPI (api.py) → OptimizationAgent
+                                              └─→ LLM backend  ← KEY DECISION
+```
+
+`api.py` and `fastapi` are already in the project; the pipeline can run inside an existing FastAPI app. The hard call is **how to serve the LLM** from a cheap host — see open questions.
+
+## Concrete pieces to build
+
+1. **Inventory and harden `api.py`.** Make sure `POST /solve` accepts `{"description": "..."}` and returns the same dict that `solve_natural_language` returns. Add `GET /health` and `GET /capabilities`. Trim anything that requires local files or shells out.
+2. **Dockerfile.** Pyomo + GLPK + Python deps + the repo. Pin GLPK via apt. One container.
+3. **LLM backend choice** (see open questions). Probably swap qwen3:14b for a cloud-hosted model the deployed instance can reach over the network. Add an `LLM_BACKEND=ollama|anthropic|openai|groq` env var; gate the existing `EnhancedLLMClient` factory on it.
+4. **Host the container.** Cheap VPS (Hetzner CX22 €4/mo, Fly.io free tier with caveats, Railway, Render). Pick one — Hetzner is the lowest-friction for a Pyomo workload.
+5. **Cloudflare wiring.** Point a subdomain at the host. Enable proxy ("orange cloud"). Use a Cloudflare-issued cert. Optional: Cloudflare Tunnel if you don't want to open ports on the box.
+6. **Demo surface.** Either a tiny static HTML page calling the API from JS, or a one-line `curl` example in the README. The page version is more impressive at zero extra effort.
+
+## Open questions
+
+- **Which LLM backend?** qwen3:14b can't run on a €4 VPS. Realistic choices:
+  - **Groq free tier** (Llama / Mixtral, fast, generous limits, no payment). Fits the budget; reliability over a CV-lifetime is the risk.
+  - **Anthropic / OpenAI paid API** (~$2–10/mo at zero traffic). Most reliable; small monthly burn.
+  - **Cloudflare Workers AI** (Llama, free quota). Ties nicely to the Cloudflare story but quality is lower than qwen3:14b.
+  - **Self-host a 7B model on a beefier VPS** (€20–40/mo). Defeats the "weekend job" framing.
+  - Recommended: Groq with an Anthropic fallback. Both behind a single `LLMClient` interface.
+- **Cold start vs always-on.** Render/Fly free tiers sleep; Hetzner doesn't. Sleeping containers means a 30s first request, which looks broken in a demo. Pay €4 for always-on.
+- **What happens when the LLM is the bottleneck.** Synchronous request takes 30–90s. Need either (a) a "this can take a minute" loading state in the demo page, or (b) async with a job ID. (a) is the weekend version.
+- **Secrets.** API keys for the LLM provider must be env vars on the host, never in the repo. Standard, but worth stating.
+
+## Definition of done
+
+- A public URL (`https://<name>.<domain>`) responds 200 to `GET /health`.
+- `POST /solve` with a natural-language transportation problem returns a valid solution dict.
+- A linked demo page / curl one-liner exists in the repo README.
+- Bullet on the CV stops being a lie.
+
+---
+
+# 📌 TODO (after deploy): Metaheuristic → MILP warm-start with interactive gap check
+
+## The idea
+
+For larger problem instances, exact MILP can be slow. A standard OR pattern is to run a fast metaheuristic first to get a good feasible solution, then hand it to the MILP solver as a **warm start (MIP start)** so the solver begins with a known upper bound and prunes the branch-and-bound tree aggressively.
+
+Layer a user-facing checkpoint on top: tell the user the current optimality gap (best-found vs. LP relaxation lower bound) and let them decide whether to keep improving or accept the heuristic answer.
+
+```
+agent.solve_natural_language(text)
+        │
+        ▼
+classify → extract → feasibility OK
+        │
+        ▼
+metaheuristic.run(params) ──► heuristic_solution, heuristic_cost
+        │
+        ▼
+solver.solve_with_warmstart(params, warm_start=heuristic_solution)
+        │
+        ▼
+every K seconds / nodes:
+  current_gap = (best_incumbent - best_bound) / best_incumbent
+  if current_gap < target_gap (e.g. 1%):  done
+  elif elapsed > soft_budget:
+      → ask user:
+        "Reached X% optimality gap in Y seconds.
+         Heuristic baseline was Z% gap.
+         (a) keep solving (estimated +T sec to close to 1%)
+         (b) accept current solution (cost = $C)
+         (c) accept heuristic baseline (cost = $H)"
+```
+
+## Why this is interesting for *this* project
+
+- Already in roadmap: "Heuristics", "Decomposition", "Solver Strategy Selection" are all listed as future priorities (months 2–5). This TODO is the **glue** between them.
+- Fits naturally into the existing follow-up handler — gap-check prompts are just another `follow_up_type` ("solver_progress_question").
+- Forces the system to surface OR concepts (optimality gap, dual bound, incumbent) to a non-OR user in plain English — which is the entire project thesis.
+- Plays well with the eval framework: round-trip eval can compare `heuristic_only` vs `heuristic+milp` vs `exact_milp_from_scratch` on the same instances. Three numbers, one chart.
+
+## Concrete pieces to build
+
+1. **`solvers/heuristics/`** — minimum viable: greedy + 2-opt local search for transportation, list-scheduling + swap moves for scheduling. ~150 lines each. No metaheuristic-framework dependency; hand-rolled is fine for Phase 1.
+2. **`solvers/transport/bipartite.py`** — add `solve(params, warm_start=None)` so the MIP solver can accept a starting solution. For Pyomo+GLPK this means setting `model.x[i,j].value = warm_start[i,j]` before solve and passing `warmstart=True` to `SolverFactory.solve`. (GLPK warm-start support for MIPs is limited; may need to swap to HiGHS or CBC. Note this in the file.)
+3. **`solvers/progress.py`** — wraps the solve call with a callback that records `(time, incumbent, bound, gap)` every K nodes. Pyomo callbacks are solver-specific; cleanest with HiGHS/Gurobi, hacky with GLPK.
+4. **`agent/core.py`** — after `solver.solve(...)`, if elapsed > soft_budget and gap > target_gap, return a special status `"interim_solution"` with the gap data instead of a final result. The intent router treats user reply as `follow_up_type="solver_progress"`.
+5. **`llm/follow_up_handler.py`** — new branch for `solver_progress`: surfaces gap numbers, asks the user (keep / accept / use heuristic), and routes back to `agent` with the decision.
+
+## User-facing copy (draft)
+
+> I've found a solution costing **$48,200**.
+>
+> The mathematical lower bound is **$45,800**, so this solution is at most **5.0% away from the theoretical optimum**.
+> The heuristic baseline I started from was 11.2% away.
+>
+> Keep going to try to close the gap further? Each additional minute will shave roughly **0.5 percentage points** off the gap based on current progress.
+>
+> Reply: **continue**, **accept $48,200**, or **use the heuristic at $51,000**.
+
+## Open questions
+
+- **Target gap.** 1%? 5%? Should it be problem-type dependent? (Scheduling tolerates larger gaps than transportation in practice.)
+- **Soft vs hard budget.** Soft = ask the user; hard = just stop. Plumbing both is cheap; UX of asking too often is real.
+- **What if the heuristic is worse than nothing.** For tiny problems, MILP is faster than the heuristic. Need a problem-size threshold below which we skip the heuristic step entirely. The Solver Strategy Selector (Priority 3 in main roadmap) is the right place to gate this.
+- **Solver swap.** GLPK has weak warm-start support for MIPs. HiGHS is the obvious upgrade and is open-source. Worth doing alongside this TODO.
+
+## Definition of done
+
+- For one solvable problem type (transport), the agent can: run heuristic → warm-start MILP → report incremental gap → accept user decision → return final answer.
+- Eval framework can compare `heuristic_only`, `heuristic+milp`, `cold_milp` on the same 100 round-trip instances.
+- README documents the new interactive checkpoint with one concrete example.
