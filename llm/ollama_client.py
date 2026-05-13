@@ -1,8 +1,63 @@
 # llm/ollama_client.py
 import json
+import re
 import requests
 from typing import Dict, Any, List
 from .client import LLMClient
+
+
+_THINK_BLOCK = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
+
+
+def _strip_thinking(text: str) -> str:
+    """Some reasoning models (deepseek-r1, qwen3) wrap chain-of-thought in
+    <think>...</think> blocks. These break JSON parsing and pollute prose
+    output. Strip them at the transport boundary so callers don't have to."""
+    return _THINK_BLOCK.sub("", text).strip()
+
+
+def _extract_json_block(text: str) -> str:
+    """Return the first balanced {...} or [...] block in text, or text unchanged.
+
+    Why: Ollama's `format=json` enforcement is incompatible with thinking
+    models like qwen3 — under that constraint the model returns `{}` because
+    it can't emit its <think> preamble. We therefore call Ollama WITHOUT
+    format=json and parse the JSON object out of free-form prose ourselves.
+    """
+    start = -1
+    opener = None
+    closer = None
+    for i, ch in enumerate(text):
+        if ch in "{[":
+            start = i
+            opener = ch
+            closer = "}" if ch == "{" else "]"
+            break
+    if start < 0:
+        return text
+    depth = 0
+    in_str = False
+    esc = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+            continue
+        if ch == opener:
+            depth += 1
+        elif ch == closer:
+            depth -= 1
+            if depth == 0:
+                return text[start:i + 1]
+    return text
 
 class OllamaClient(LLMClient):
     """Ollama LLM client implementation"""
@@ -32,16 +87,19 @@ class OllamaClient(LLMClient):
                 "temperature": 0,
                 "top_p": 0.9,
                 "repeat_penalty": 1.1,
-                "num_ctx": 4096,
+                "num_ctx": 8192,
                 "stop": ["\n\n```", "\n\n#","</json>"]
             }
         }
-        if json_mode:
-            # Force well-formed JSON content from the model
-            payload["format"] = "json"
+        # NOTE: we deliberately do NOT set payload["format"] = "json" even when
+        # json_mode=True. Ollama's JSON-grammar enforcement is incompatible with
+        # thinking models (qwen3, deepseek-r1) — under that constraint they
+        # emit `{}` instantly because they cannot produce their <think> block.
+        # Instead we let the model talk normally, strip <think>...</think>, and
+        # extract the JSON block ourselves below.
 
         try:
-            resp = requests.post(f"{self.host}/api/chat", json=payload, timeout=60)
+            resp = requests.post(f"{self.host}/api/chat", json=payload, timeout=180)
             resp.raise_for_status()
             data = resp.json()
 
@@ -49,7 +107,10 @@ class OllamaClient(LLMClient):
             if "message" not in data or "content" not in data["message"]:
                 raise ValueError(f"Invalid response format from Ollama: {data}")
 
-            return data["message"]["content"]
+            content = _strip_thinking(data["message"]["content"])
+            if json_mode:
+                content = _extract_json_block(content)
+            return content
 
         except requests.exceptions.Timeout:
             raise requests.exceptions.Timeout(

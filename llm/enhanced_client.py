@@ -67,9 +67,9 @@ class EnhancedLLMClient(LLMClient):
             "problem_type": classification["problem_type"],  # new field
             "solver_id": classification.get("solver_id", "none"),  # NEW: specific solver
             "confidence": classification["confidence"],
-            "signals": classification["signals"],
-            "evidence": classification["evidence"],
-            "reasoning": classification["why_short"],
+            "signals": classification.get("signals", {}),
+            "evidence": classification.get("evidence", []),
+            "reasoning": classification.get("why_short", ""),
             "objective": classification.get("objective", {}),
             "votes": votes  # Include all votes for debugging
         }
