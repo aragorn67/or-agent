@@ -74,9 +74,12 @@ def check_sink_reachability(instance) -> tuple[bool, list[str]]:
     if not sources or not sinks:
         return True, []  # Skip if can't identify sets
 
-    # Get cost matrix and arc capacities
+    # Get cost matrix and arc capacities. Treat empty dict as "unspecified" —
+    # an LLM extractor may emit `arc_capacity: {}` when no arc caps were stated.
     cost = params.get('cost', {})
     arc_capacity = params.get('arc_capacity', None)
+    if not arc_capacity:
+        arc_capacity = None
     demand = params.get('demand', {})
 
     # For each sink, check if it can be reached
@@ -123,9 +126,9 @@ def check_individual_sink_capacity(instance) -> tuple[bool, list[str]]:
     sets = instance.sets if hasattr(instance, 'sets') else instance.get('sets', {})
     params = instance.params if hasattr(instance, 'params') else instance.get('params', {})
 
-    # Get arc capacities - if not specified, skip this check
+    # Get arc capacities - if not specified (or empty dict from LLM), skip this check
     arc_capacity = params.get('arc_capacity', None)
-    if arc_capacity is None:
+    if not arc_capacity:
         return True, []  # No arc capacities, skip
 
     # Get sources and sinks
