@@ -52,3 +52,7 @@ ML_RAG_archive/ML_approaches/RAG/papers/
 
 # Generated eval outputs
 evals/results/
+
+# Runtime artifacts
+test_output/
+.pytest_cache/
