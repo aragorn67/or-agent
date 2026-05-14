@@ -1,7 +1,11 @@
-"""Turn a transportation params dict into a natural-language problem statement.
+"""Turn a generated params dict into a natural-language problem statement.
 
-Uses the reasoning model (deepseek-r1) for prose quality. Caches outputs by cache_key
-on disk so re-running the eval doesn't re-pay the LLM cost for the same seed.
+Uses the reasoning model for prose quality. Caches outputs by cache_key on disk so
+re-running the eval doesn't re-pay the LLM cost for the same seed.
+
+Supports two domains: "transport" (bipartite transportation) and "scheduling"
+(single-stage IPM). Each domain plugs in its own system prompt, user-message
+renderer, and coverage check.
 """
 
 from __future__ import annotations
@@ -15,11 +19,11 @@ from typing import Any, Dict, Optional
 
 
 _CACHE_DIR = Path(__file__).parent / "results" / ".verbalizer_cache"
-# Bump when the system prompt changes so old cache entries are not reused.
-_PROMPT_VERSION = "v2"
+# Bump when any system prompt changes so old cache entries are not reused.
+_PROMPT_VERSION = "v5"
 
 
-_SYSTEM_PROMPT = """You are an operations research problem writer.
+_TRANSPORT_SYSTEM_PROMPT = """You are an operations research problem writer.
 Given a structured transportation problem, write a natural-language description that
 an optimization agent could read and extract the same parameters from.
 
@@ -41,8 +45,37 @@ FORMAT:
 """
 
 
-def _params_to_user_message(params: Dict[str, Any]) -> str:
-    """Render the params dict into a deterministic textual form for the LLM prompt."""
+_SCHEDULING_SYSTEM_PROMPT = """You are an operations research problem writer.
+Given a structured single-stage scheduling problem, write a natural-language
+description that an optimization agent could read and extract the same
+parameters from.
+
+HARD REQUIREMENTS — do not violate any of these:
+1. Open by clearly stating this is a SCHEDULING problem, e.g. "We need to
+   schedule a set of production orders on parallel processing units." Use the
+   words "schedule" and "processing units" (or "machines") explicitly.
+2. State that there are N orders and M processing units, using the exact
+   count words ("3 orders", "2 units").
+3. Name every order exactly as given.
+4. Name every unit exactly as given.
+5. State that every order can be processed on any of the units (full eligibility).
+6. State the processing time for EVERY order-unit pair. If there are N orders
+   and M units, you MUST mention N*M distinct processing times, each paired
+   with its order name and unit name. No summaries, no "for example".
+7. State the due date / deadline for every order as an absolute number of hours.
+8. State the objective: minimize the makespan (the time at which the last
+   order completes).
+
+FORMAT:
+- Plain prose, full sentences. No JSON, no curly braces, no key-value colons.
+- Do not write key names like "orders:" or "processing_time:". Phrase numbers in
+  words like "OrderA takes 3 hours on Unit1" or "OrderB is due by hour 18".
+- Output ONLY the problem statement. No preamble, no commentary, no markdown.
+"""
+
+
+def _transport_user_message(params: Dict[str, Any]) -> str:
+    """Render the transport params dict into a deterministic textual form."""
     cap = params["capacity"]
     dem = params["demand"]
     plants_str = ", ".join(f"{p}={cap[p]}" for p in params["plants"])
@@ -58,7 +91,29 @@ def _params_to_user_message(params: Dict[str, Any]) -> str:
     return "\n".join(lines) + "\n\nWrite the problem statement now."
 
 
-_LEAKAGE_PATTERNS = [
+def _scheduling_user_message(params: Dict[str, Any]) -> str:
+    """Render the scheduling params dict into a deterministic textual form."""
+    orders = params["orders"]
+    units = params["units"]
+    pt = params["processing_time"]
+    dd = params["due_date"]
+    lines = [
+        f"Orders ({len(orders)}): {', '.join(orders)}",
+        f"Units ({len(units)}): {', '.join(units)}",
+        "Eligibility: every order can run on any unit.",
+        "Processing times (hours):",
+    ]
+    for o in orders:
+        for u in units:
+            lines.append(f"  {o} on {u}: {pt[o][u]}")
+    lines.append("Due dates:")
+    for o in orders:
+        lines.append(f"  {o}: {dd[o]}")
+    lines.append("Objective: minimize makespan.")
+    return "\n".join(lines) + "\n\nWrite the problem statement now."
+
+
+_TRANSPORT_LEAKAGE_PATTERNS = [
     re.compile(r"[{}]"),
     re.compile(r"\bplants\s*:", re.IGNORECASE),
     re.compile(r"\bmarkets\s*:", re.IGNORECASE),
@@ -67,14 +122,23 @@ _LEAKAGE_PATTERNS = [
     re.compile(r"\bcost\s*:", re.IGNORECASE),
 ]
 
+_SCHEDULING_LEAKAGE_PATTERNS = [
+    re.compile(r"[{}]"),
+    # Underscored JSON keys would indicate structural leakage. Bare "Orders:"
+    # or "Units:" are valid English headings (e.g. "Orders: A, B, C need to..."),
+    # so they're not treated as leakage here.
+    re.compile(r"\bprocessing_time\s*:", re.IGNORECASE),
+    re.compile(r"\bdue_date\s*:", re.IGNORECASE),
+]
 
-def _assert_no_leakage(text: str) -> None:
-    for pat in _LEAKAGE_PATTERNS:
+
+def _assert_no_leakage(text: str, patterns: list) -> None:
+    for pat in patterns:
         if pat.search(text):
             raise ValueError(f"Verbalizer leaked structural cue matching {pat.pattern!r}")
 
 
-def _coverage_missing(text: str, params: Dict[str, Any]) -> Dict[str, list]:
+def _transport_coverage_missing(text: str, params: Dict[str, Any]) -> Dict[str, list]:
     """Return whatever the verbalization failed to mention. Empty dict means full coverage."""
     lower = text.lower()
     missing = {"plants": [], "markets": [], "costs": []}
@@ -98,6 +162,50 @@ def _coverage_missing(text: str, params: Dict[str, Any]) -> Dict[str, list]:
     return {k: v for k, v in missing.items() if v}
 
 
+def _scheduling_coverage_missing(text: str, params: Dict[str, Any]) -> Dict[str, list]:
+    """Return whatever the scheduling verbalization failed to mention."""
+    lower = text.lower()
+    missing = {"orders": [], "units": [], "processing_times": [], "due_dates": []}
+
+    for o in params["orders"]:
+        if o.lower() not in lower:
+            missing["orders"].append(o)
+    for u in params["units"]:
+        if u.lower() not in lower:
+            missing["units"].append(u)
+
+    for o in params["orders"]:
+        for u in params["units"]:
+            v = params["processing_time"][o][u]
+            tokens = {f"{v:.2f}", f"{v:.1f}", f"{v:g}", str(int(v)) if float(v).is_integer() else f"{v}"}
+            if not any(t in text for t in tokens):
+                missing["processing_times"].append((o, u, v))
+
+    for o in params["orders"]:
+        v = params["due_date"][o]
+        tokens = {f"{v:.2f}", f"{v:.1f}", f"{v:g}", str(int(v)) if float(v).is_integer() else f"{v}"}
+        if not any(t in text for t in tokens):
+            missing["due_dates"].append((o, v))
+
+    return {k: v for k, v in missing.items() if v}
+
+
+_DOMAINS = {
+    "transport": {
+        "system_prompt": _TRANSPORT_SYSTEM_PROMPT,
+        "user_message": _transport_user_message,
+        "leakage_patterns": _TRANSPORT_LEAKAGE_PATTERNS,
+        "coverage_missing": _transport_coverage_missing,
+    },
+    "scheduling": {
+        "system_prompt": _SCHEDULING_SYSTEM_PROMPT,
+        "user_message": _scheduling_user_message,
+        "leakage_patterns": _SCHEDULING_LEAKAGE_PATTERNS,
+        "coverage_missing": _scheduling_coverage_missing,
+    },
+}
+
+
 def _cache_path(cache_key: str) -> Path:
     versioned = f"{_PROMPT_VERSION}:{cache_key}"
     digest = hashlib.sha1(versioned.encode()).hexdigest()[:16]
@@ -109,37 +217,43 @@ def verbalize(
     llm_client,
     cache_key: Optional[str] = None,
     style: str = "neutral",
+    domain: str = "transport",
 ) -> str:
     """Render params as a natural-language problem statement.
 
     Args:
-        params: transportation params dict
+        params: params dict for the chosen domain
         llm_client: an EnhancedLLMClient (we use its reasoning_client._chat)
         cache_key: stable string (e.g., f"seed:{seed}:style:{style}") for disk cache
-        style: reserved for Phase 2 robustness tests (neutral/formal/casual/noisy)
+        style: reserved for robustness tests (neutral/formal/casual/noisy)
+        domain: "transport" or "scheduling"
 
     Returns:
         Natural-language text safe to pass to agent.solve_natural_language.
     """
+    if domain not in _DOMAINS:
+        raise ValueError(f"Unknown domain {domain!r}; expected one of {list(_DOMAINS)}")
+    spec = _DOMAINS[domain]
+
     if cache_key is not None:
-        cpath = _cache_path(cache_key)
+        cpath = _cache_path(f"{domain}:{cache_key}")
         if cpath.exists():
             return cpath.read_text()
 
-    user_msg = _params_to_user_message(params)
+    user_msg = spec["user_message"](params)
+    base_prompt = spec["system_prompt"]
 
     for attempt in range(2):
-        system_prompt = _SYSTEM_PROMPT
+        system_prompt = base_prompt
         if attempt > 0:
             system_prompt += (
-                "\nYOUR PREVIOUS ATTEMPT WAS INCOMPLETE. You MUST mention every single "
-                "plant, every single market, and every single cost number. Do not "
-                "summarize or skip any route."
+                "\nYOUR PREVIOUS ATTEMPT WAS INCOMPLETE. You MUST mention every "
+                "entity and every number from the input. Do not summarize or skip."
             )
         raw = llm_client.reasoning_client._chat(system_prompt, user_msg, json_mode=False)
         text = _strip_thinking(raw).strip()
-        _assert_no_leakage(text)
-        missing = _coverage_missing(text, params)
+        _assert_no_leakage(text, spec["leakage_patterns"])
+        missing = spec["coverage_missing"](text, params)
         if not missing:
             break
     else:
@@ -147,7 +261,7 @@ def verbalize(
 
     if cache_key is not None:
         _CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        _cache_path(cache_key).write_text(text)
+        _cache_path(f"{domain}:{cache_key}").write_text(text)
 
     return text
 

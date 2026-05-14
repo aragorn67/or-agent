@@ -146,17 +146,23 @@ def check_domain_validity(instance) -> tuple[bool, list[str]]:
 
         param_data = params[param_name]
 
-        # Handle dict parameters
+        # Handle dict parameters (flat or nested, e.g. processing_time[order][unit])
         if isinstance(param_data, dict):
-            for key, value in param_data.items():
+            stack = [([str(k)], v) for k, v in param_data.items()]
+            while stack:
+                path, value = stack.pop()
+                if isinstance(value, dict):
+                    stack.extend(([*path, str(k)], v) for k, v in value.items())
+                    continue
+                key_str = "][".join(path)
                 if not _is_valid_number(value):
                     return False, [
-                        f"Parameter '{param_name}[{key}]' has invalid value: {value}. "
+                        f"Parameter '{param_name}[{key_str}]' has invalid value: {value}. "
                         f"Must be a finite number."
                     ]
                 if value < 0:
                     return False, [
-                        f"Parameter '{param_name}[{key}]' is negative: {value}. "
+                        f"Parameter '{param_name}[{key_str}]' is negative: {value}. "
                         f"This parameter must be non-negative."
                     ]
 

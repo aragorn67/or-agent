@@ -1,8 +1,8 @@
-"""CLI entry: round-trip the agent against N synthetic transportation instances.
+"""CLI entry: round-trip the agent against N synthetic instances.
 
 Usage:
     python -m evals.run_eval --n 100 --domain transport
-    python -m evals.run_eval --n 5 --seeds 1,2,3,4,5
+    python -m evals.run_eval --n 5 --seeds 1,2,3,4,5 --domain scheduling
 """
 
 from __future__ import annotations
@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import datetime as _dt
 import json
+import os
 import statistics as _st
 import sys
 import time
@@ -17,13 +18,24 @@ from collections import Counter
 from pathlib import Path
 from typing import List
 
-from agent.core import OptimizationAgent
-from llm.enhanced_client import EnhancedLLMClient
-
 from .round_trip import RoundTripResult, run_one
 
 
 _RESULTS_DIR = Path(__file__).parent / "results"
+
+_EXPECTED_CLASSIFICATION = {
+    "transport": {"TRANSPORTATION"},
+    "scheduling": {
+        "SINGLE_STAGE_SCHEDULING",
+        "SINGLE_MACHINE_MAKESPAN",
+        "PARALLEL_MACHINE_SCHEDULING",
+    },
+}
+
+_PARAM_KEYS = {
+    "transport": ("plants", "markets", "capacity", "demand", "cost"),
+    "scheduling": ("orders", "units", "processing_time", "due_date"),
+}
 
 
 def _parse_seeds(arg: str, n: int) -> List[int]:
@@ -32,20 +44,22 @@ def _parse_seeds(arg: str, n: int) -> List[int]:
     return list(range(1, n + 1))
 
 
-def _aggregate(results: List[RoundTripResult], gap_threshold: float) -> dict:
+def _aggregate(results: List[RoundTripResult], gap_threshold: float, domain: str) -> dict:
     n = len(results)
+    expected = _EXPECTED_CLASSIFICATION[domain]
     classification_hits = sum(
         1 for r in results
-        if r.recovered_classification and str(r.recovered_classification).upper() == "TRANSPORTATION"
+        if r.recovered_classification and str(r.recovered_classification).upper() in expected
     )
 
     scored = [r for r in results if r.param_recall is not None]
     if scored:
         overall_recalls = [r.param_recall["overall"] for r in scored]
         per_key = {}
-        for key in ("plants", "markets", "capacity", "demand", "cost"):
-            vals = [r.param_recall["by_key"][key] for r in scored]
-            per_key[key] = {"mean": _st.mean(vals), "min": min(vals), "max": max(vals)}
+        for key in _PARAM_KEYS[domain]:
+            vals = [r.param_recall["by_key"][key] for r in scored if key in r.param_recall["by_key"]]
+            if vals:
+                per_key[key] = {"mean": _st.mean(vals), "min": min(vals), "max": max(vals)}
         recall_stats = {
             "mean_overall": _st.mean(overall_recalls),
             "median_overall": _st.median(overall_recalls),
@@ -97,14 +111,24 @@ def main(argv=None):
     p = argparse.ArgumentParser(description="Round-trip eval for transportation agent")
     p.add_argument("--n", type=int, default=100, help="Number of round-trips")
     p.add_argument("--seeds", type=str, default="", help="Comma-separated seeds (overrides --n)")
-    p.add_argument("--domain", type=str, default="transport", choices=["transport"])
+    p.add_argument("--domain", type=str, default="transport", choices=["transport", "scheduling"])
     p.add_argument("--gap-threshold", type=float, default=0.01, help="Objective gap to count as pass")
     p.add_argument("--output", type=str, default="", help="Output JSON path (default auto-named)")
+    p.add_argument("--backend", type=str, default="ollama", choices=["ollama", "groq"],
+                   help="LLM backend (default: ollama). Overrides $LLM_BACKEND.")
     args = p.parse_args(argv)
+
+    # Force the chosen backend before importing the LLM client so shell env
+    # (e.g. LLM_BACKEND=groq exported globally) doesn't silently win.
+    os.environ["LLM_BACKEND"] = args.backend
+
+    from agent.core import OptimizationAgent
+    from llm.enhanced_client import EnhancedLLMClient
 
     seeds = _parse_seeds(args.seeds, args.n)
 
-    print(f"[run_eval] domain={args.domain} n={len(seeds)} gap_threshold={args.gap_threshold}", flush=True)
+    print(f"[run_eval] domain={args.domain} backend={args.backend} n={len(seeds)} "
+          f"gap_threshold={args.gap_threshold}", flush=True)
 
     llm = EnhancedLLMClient()
     agent = OptimizationAgent(llm)
@@ -113,12 +137,10 @@ def main(argv=None):
     t0 = time.perf_counter()
     for i, seed in enumerate(seeds, 1):
         try:
-            r = run_one(seed, agent, llm, gap_threshold=args.gap_threshold)
+            r = run_one(seed, agent, llm, gap_threshold=args.gap_threshold, domain=args.domain)
         except Exception as e:
             r = RoundTripResult(
-                seed=seed, generated_params={}, true_objective=None,
-                verbalized_text=None, recovered_classification=None,
-                recovered_params=None, recovered_objective=None,
+                seed=seed, domain=args.domain, generated_params={},
                 failure_bucket="agent_exception", error=f"unhandled: {e}",
             )
         results.append(r)
@@ -131,7 +153,7 @@ def main(argv=None):
         "domain": args.domain,
         "started_at": _dt.datetime.now().isoformat(timespec="seconds"),
         "wall_seconds": elapsed,
-        "metrics": _aggregate(results, args.gap_threshold),
+        "metrics": _aggregate(results, args.gap_threshold, args.domain),
         "results": [r.to_dict() for r in results],
     }
 

@@ -33,16 +33,16 @@ class SchedulingSpecialist:
             except:
                 pass  # KB not available, continue without RAG
 
-        system = f"""
+        system = """
 Extract parameters for a Scheduling problem. Output STRICT JSON with keys:
 - orders: string[] (jobs, tasks, orders to be scheduled)
 - units: string[] (machines, resources, processing units)
-- eligible: {{order: string[]}} (which units can process each order)
-- processing_time: {{order: {{unit: number}}}} (time to process order on unit)
-- due_date: {{order: number}} (deadline for each order)
-- changeover: {{unit: {{order1: {{order2: number}}}}}} (optional - setup/changeover time between orders on same unit)
-- window: {{order: 0 or 1}} (optional - if 1, order has strict time window)
-- lower: {{order: number}} (optional - earliest start time for orders with time window)
+- eligible: {order: string[]} (which units can process each order)
+- processing_time: {order: {unit: number}} (time to process order on unit)
+- due_date: {order: number} (deadline for each order)
+- changeover: {unit: {order1: {order2: number}}} (optional - setup/changeover time between orders on same unit)
+- window: {order: 0 or 1} (optional - if 1, order has strict time window)
+- lower: {order: number} (optional - earliest start time for orders with time window)
 - objective: string (optional - "makespan" or "changeover", default "makespan")
 
 EXTRACTION RULES:
@@ -53,7 +53,7 @@ EXTRACTION RULES:
 5. Extract eligibility constraints (e.g., "Order B can only use Unit 1")
 6. Extract changeover/setup times if mentioned (e.g., "switching from A to B takes 0.5 hours")
 7. If time windows mentioned, set window=1 and extract lower bound
-8. If ANY required piece is missing, return: {{"error": "<specific missing information>"}}
+8. If ANY required piece is missing, return: {"error": "<specific missing information>"}
 9. All numbers must be numeric types, not strings
 10. Time units should be consistent (convert to hours if needed)
 

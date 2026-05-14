@@ -74,22 +74,54 @@ def _cost_recall(generated: Any, recovered: Any) -> float:
     return matched / len(g)
 
 
-def param_recall(generated: Dict[str, Any], recovered: Dict[str, Any]) -> Dict[str, Any]:
+_TRANSPORT_KEYS = ("plants", "markets", "capacity", "demand", "cost")
+_SCHEDULING_KEYS = ("orders", "units", "processing_time", "due_date")
+
+
+def _flat_processing_time(pt: Any) -> Dict[Tuple[str, str], float]:
+    """Normalize processing_time to {(order, unit): float}; nested or flat-tuple."""
+    return _flat_cost(pt)
+
+
+def _processing_time_recall(generated: Any, recovered: Any) -> float:
+    g = _flat_processing_time(generated)
+    r = _flat_processing_time(recovered)
+    if not g:
+        return 1.0
+    if not r:
+        return 0.0
+    matched = sum(1 for k, v in g.items() if k in r and _num_close(v, r[k]))
+    return matched / len(g)
+
+
+def param_recall(
+    generated: Dict[str, Any],
+    recovered: Dict[str, Any],
+    domain: str = "transport",
+) -> Dict[str, Any]:
     """Per-key recall + macro-average overall score.
 
     Returns:
-        {"overall": 0..1, "by_key": {"plants": ..., "markets": ..., ...}}
+        {"overall": 0..1, "by_key": {<domain-specific keys>: ...}}
     """
     if not isinstance(recovered, dict):
         recovered = {}
 
-    per_key = {
-        "plants":   _set_recall(generated.get("plants", []),  recovered.get("plants", [])),
-        "markets":  _set_recall(generated.get("markets", []), recovered.get("markets", [])),
-        "capacity": _dict_recall(generated.get("capacity", {}), recovered.get("capacity", {})),
-        "demand":   _dict_recall(generated.get("demand", {}),   recovered.get("demand", {})),
-        "cost":     _cost_recall(generated.get("cost", {}),     recovered.get("cost", {})),
-    }
+    if domain == "scheduling":
+        per_key = {
+            "orders":          _set_recall(generated.get("orders", []),  recovered.get("orders", [])),
+            "units":           _set_recall(generated.get("units", []),   recovered.get("units", [])),
+            "processing_time": _processing_time_recall(generated.get("processing_time", {}), recovered.get("processing_time", {})),
+            "due_date":        _dict_recall(generated.get("due_date", {}), recovered.get("due_date", {})),
+        }
+    else:
+        per_key = {
+            "plants":   _set_recall(generated.get("plants", []),  recovered.get("plants", [])),
+            "markets":  _set_recall(generated.get("markets", []), recovered.get("markets", [])),
+            "capacity": _dict_recall(generated.get("capacity", {}), recovered.get("capacity", {})),
+            "demand":   _dict_recall(generated.get("demand", {}),   recovered.get("demand", {})),
+            "cost":     _cost_recall(generated.get("cost", {}),     recovered.get("cost", {})),
+        }
     overall = sum(per_key.values()) / len(per_key)
     return {"overall": overall, "by_key": per_key}
 

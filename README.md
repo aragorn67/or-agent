@@ -100,13 +100,30 @@ CLASSIFICATION_MODEL=qwen3:8b EXTRACTION_MODEL=qwen3:14b REASONING_MODEL=qwen3:1
 
 ### REST API
 
-A FastAPI server is included; the primary endpoint is `POST /solve/natural` which accepts `{"description": "..."}` and returns the same dict the Python entry point returns. The remaining endpoints (capabilities, sensitivity plots, conversation sessions) are exercised by the test suite.
+A FastAPI server is included. The primary endpoint is `POST /solve` (alias `POST /solve/natural`) which accepts `{"description": "..."}` and returns the agent's solution dict. Auxiliary endpoints: `GET /health`, `GET /capabilities`, `POST /agent/classify`.
 
 ```bash
 uvicorn api:app --host 0.0.0.0 --port 8000
+
+# Then, from another shell:
+curl -s -X POST http://localhost:8000/solve \
+  -H "Content-Type: application/json" \
+  -d '{"description": "Two plants Seattle (cap 350) and San Diego (cap 600) ship to New York (demand 325), Chicago (demand 300), Topeka (demand 275). Distances in thousand miles — Seattle: NY=2.5, Chicago=1.7, Topeka=1.8. San Diego: NY=2.5, Chicago=1.8, Topeka=1.4. Freight $90 per case per thousand miles. Minimise total shipping cost."}'
 ```
 
-Public deployment behind Cloudflare is on the roadmap — see [`brainstorm_ideas.md`](brainstorm_ideas.md).
+The LLM backend is selected by the `LLM_BACKEND` env var: `ollama` (default; uses the local qwen3:14b stack) or `groq` (uses Groq's hosted Llama models, set `GROQ_API_KEY`). The latter is intended for hosted deployments that cannot keep a 9 GB local model resident.
+
+```bash
+LLM_BACKEND=groq GROQ_API_KEY=$GROQ_API_KEY \
+  GROQ_CLASSIFICATION_MODEL=llama-3.1-8b-instant \
+  uvicorn api:app --host 0.0.0.0 --port 8000
+```
+
+A `Dockerfile` is included for hosted deployment. For a zero-cost demo the API can be exposed publicly with [`cloudflared`](https://github.com/cloudflare/cloudflared) without any VPS:
+
+```bash
+cloudflared tunnel --url http://localhost:8000   # yields an ephemeral https://*.trycloudflare.com URL
+```
 
 ## Evaluation
 
@@ -139,13 +156,18 @@ compare → classification accuracy
 Run it:
 
 ```bash
-python -m evals.run_eval --n 20             # 20 fresh seeds
-python -m evals.run_eval --seeds 1,2,3      # specific seeds
+python -m evals.run_eval --domain transport  --seeds 1,2,3   # transportation
+python -m evals.run_eval --domain scheduling --seeds 1,2,3   # single-stage scheduling
+python -m evals.run_eval --n 20                              # 20 fresh seeds, transport
 ```
 
-The framework writes a timestamped JSON report under `evals/results/` containing the six headline metrics.
+The CLI defaults to local Ollama (`--backend ollama`); pass `--backend groq` to opt into the hosted backend. The framework writes a timestamped JSON report under `evals/results/` containing the six headline metrics.
 
-**Baseline result (transportation, qwen3:14b, N=20):** classification accuracy 1.00, mean parameter recall 1.00, median objective gap 0.00, end-to-end pass rate 1.00. The framework already paid for itself during development by surfacing a latent feasibility-checker bug that the existing hand-curated test set had missed.
+**Baseline results (qwen3:14b, local Ollama):**
+- *Transportation* — classification accuracy 1.00, mean parameter recall 1.00, median objective gap 0.00, end-to-end pass rate 1.00.
+- *Single-stage scheduling* — classification accuracy 1.00, mean parameter recall 1.00, median objective gap 0.00, end-to-end pass rate 1.00 (3/3 seeds).
+
+The framework has already paid for itself during development by surfacing four real bugs the existing hand-curated test set had missed: one feasibility-checker bug on the transport side, plus three on the scheduling side (an f-string format-spec crash in the scheduling extractor's system prompt, a non-recursive non-negativity check that rejected nested `processing_time` dicts, and an extraction-dispatch list that lagged behind the classifier's solver mapping).
 
 Caveat: synthetic random problems with feasibility margins built in are the easy end of the input distribution. The 27-problem hand-curated set under `tests/or_problem_repository.py` is held out as a realism benchmark.
 
@@ -156,11 +178,10 @@ Caveat: synthetic random problems with feasibility margins built in are the easy
 - Single-stage scheduling (IPM-based makespan)
 - Three-layer feasibility checking with diagnostic suggestions
 - Sensitivity / what-if / re-solve follow-up analysis on transportation
-- Round-trip eval framework (transportation; scheduling generator is next)
+- Round-trip eval framework for both transportation and single-stage scheduling
 
 **On the roadmap** (see [`brainstorm_ideas.md`](brainstorm_ideas.md) for detail):
-- Scheduling generator for the eval framework
-- Public REST API deployment behind Cloudflare
+- Metamorphic transforms layered on the eval (double-costs → double-objective, permute plants → same objective, etc.)
 - Metaheuristic warm-start with interactive optimality-gap checkpoint
 - CSV/Excel data loaders
 - Decomposition strategies (Benders, Dantzig-Wolfe) for large MILPs

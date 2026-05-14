@@ -700,23 +700,25 @@ class OptimizationAgent:
         return problem_type
 
     def get_capabilities(self) -> Dict[str, Any]:
-        """Return agent capabilities and supported problem types"""
-        problem_types = list_problem_types()
+        """Return agent capabilities, keyed by registered solver_id."""
+        from solvers import list_solvers
+        registered = list_solvers()
         capabilities = {}
-
-        for ptype in problem_types:
+        for entry in registered:
+            sid = entry["solver_id"]
             try:
-                solver = get_solver(ptype)
-                capabilities[ptype] = {
+                solver = get_solver(sid)
+                capabilities[sid] = {
+                    "problem_type": entry["problem_type"],
                     "description": solver.description,
-                    "example_params": solver.get_example_params()
+                    "example_params": solver.get_example_params(),
                 }
             except Exception as e:
-                capabilities[ptype] = {"error": str(e)}
+                capabilities[sid] = {"error": str(e)}
 
         return {
-            "supported_types": problem_types,
-            "capabilities": capabilities
+            "supported_solvers": [e["solver_id"] for e in registered],
+            "capabilities": capabilities,
         }
 
     def _extract_sets_from_params(self, params: Dict) -> Dict:

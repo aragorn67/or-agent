@@ -2,56 +2,67 @@
 from typing import Dict, Any, List, Optional
 from .client import LLMClient
 from .ollama_client import OllamaClient
+from .groq_client import GroqClient
 from .transportation_specialist import TransportationSpecialist
 from .scheduling_specialist import SchedulingSpecialist
 from .problem_classifier import ProblemClassifier
 from config import Config
 
+
+def _make_stage_client(stage: str):
+    """Return a per-stage chat client honoring Config.LLM_BACKEND.
+
+    stage ∈ {"classification", "extraction", "reasoning"}.
+    """
+    backend = Config.LLM_BACKEND
+    if backend == "ollama":
+        model = {
+            "classification": Config.CLASSIFICATION_MODEL,
+            "extraction": Config.EXTRACTION_MODEL,
+            "reasoning": Config.REASONING_MODEL,
+        }[stage]
+        return OllamaClient(Config.OLLAMA_HOST, model)
+    if backend == "groq":
+        model = {
+            "classification": Config.GROQ_CLASSIFICATION_MODEL,
+            "extraction": Config.GROQ_EXTRACTION_MODEL,
+            "reasoning": Config.GROQ_REASONING_MODEL,
+        }[stage]
+        return GroqClient(model=model, api_key=Config.GROQ_API_KEY)
+    raise ValueError(
+        f"Unsupported LLM_BACKEND={backend!r}. Expected one of: ollama, groq."
+    )
+
+
 class EnhancedLLMClient(LLMClient):
     """
     Enhanced LLM client with multi-model pipeline.
 
-    Uses different specialized models for different stages (actual model names
-    come from Config; defaults shown for illustration):
-    - Classification: Config.CLASSIFICATION_MODEL (default qwen2.5:3b-instruct — fast)
-    - Extraction:     Config.EXTRACTION_MODEL    (default qwen2.5-coder:7b — structured JSON)
-    - Reasoning:      Config.REASONING_MODEL     (default deepseek-r1:latest — explanations, what-ifs)
+    Stage clients (classification / extraction / reasoning) are constructed from
+    Config.LLM_BACKEND. Use LLM_BACKEND=ollama (default) for local dev and
+    LLM_BACKEND=groq for hosted deployment.
     """
 
-    def __init__(
-        self,
-        host: str = None,
-        model: str = None,  # Deprecated: kept for backward compatibility
-        knowledge_base=None
-    ):
-        """
-        Initialize enhanced LLM client with multi-model pipeline.
-
-        Args:
-            host: Ollama host URL (default from Config)
-            model: Deprecated - models now auto-selected per stage
-            knowledge_base: Optional KnowledgeBase for RAG
-        """
-        if host is None:
-            host = Config.OLLAMA_HOST
-
-        self.host = host
+    def __init__(self, host: str = None, model: str = None, knowledge_base=None):
+        # host/model kwargs are accepted for backward compatibility but ignored —
+        # backend selection now flows entirely through Config.LLM_BACKEND.
         self.kb = knowledge_base
 
-        # Stage A: Classification (Config.CLASSIFICATION_MODEL)
-        self.classification_client = OllamaClient(host, Config.CLASSIFICATION_MODEL)
+        # Stage A: Classification
+        self.classification_client = _make_stage_client("classification")
         self.classifier = ProblemClassifier(self.classification_client)
 
-        # Stage B: Parameter Extraction (Config.EXTRACTION_MODEL)
-        self.extraction_client = OllamaClient(host, Config.EXTRACTION_MODEL)
+        # Stage B: Parameter Extraction
+        self.extraction_client = _make_stage_client("extraction")
         self.transportation = TransportationSpecialist(self.extraction_client, knowledge_base)
         self.scheduling = SchedulingSpecialist(self.extraction_client, knowledge_base)
 
-        # Stage E: Reasoning & Explanations (Config.REASONING_MODEL)
-        self.reasoning_client = OllamaClient(host, Config.REASONING_MODEL)
+        # Stage E: Reasoning & Explanations
+        self.reasoning_client = _make_stage_client("reasoning")
 
         # Legacy: base_client points to classification for backward compatibility
         self.base_client = self.classification_client
+        self.host = getattr(self.base_client, "host", None)
 
         # Future specialists can be added here:
         # self.assignment = AssignmentSpecialist(self.base_client, knowledge_base)
@@ -85,8 +96,17 @@ class EnhancedLLMClient(LLMClient):
         if problem_type in ["TRANSPORTATION", "MIN_COST_FLOW"]:
             return self.transportation.extract_parameters(description)
 
-        # Scheduling family
-        elif problem_type in ["SCHEDULING", "SINGLE_STAGE_SCHEDULING", "SINGLE_MACHINE_TARDINESS", "JOB_SHOP"]:
+        # Scheduling family — every label the classifier maps to the single-stage
+        # IPM solver in llm/problem_classifier.py must also route here. Otherwise
+        # the agent classifies correctly but extraction rejects the same label.
+        elif problem_type in [
+            "SCHEDULING",
+            "SINGLE_STAGE_SCHEDULING",
+            "SINGLE_MACHINE_MAKESPAN",
+            "SINGLE_MACHINE_TARDINESS",
+            "PARALLEL_MACHINE_SCHEDULING",
+            "JOB_SHOP",
+        ]:
             return self.scheduling.extract_parameters(description)
 
         # Future problem types:

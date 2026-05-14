@@ -1,0 +1,41 @@
+# Local Python env (heavy, rebuilt inside the container)
+Tolis_Env/
+**/__pycache__/
+*.pyc
+*.pyo
+
+# Git / VCS
+.git/
+.gitignore
+.github/
+
+# Editor / IDE
+.vscode/
+.idea/
+
+# Tests & evals (not needed at runtime)
+tests/
+.pytest_cache/
+evals/
+
+# Archives and one-off scratch
+archive/
+ML_RAG_archive/
+analysis/
+
+# Data + generated artifacts
+data/
+solutions/
+*.png
+
+# Local docs
+brainstorm_ideas.md
+
+# Local-only files
+.env
+.env.*
+*.log
+
+# OS junk
+.DS_Store
+Thumbs.db

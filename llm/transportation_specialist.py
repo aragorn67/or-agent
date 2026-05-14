@@ -56,7 +56,9 @@ EXTRACTION RULES:
 8. **CRITICAL: When extracting arc_capacity, include ALL routes mentioned, even if capacity is 0! A capacity of 0 means that route is blocked. Missing entries will be treated as infinite capacity!**
 9. **If cost values are not specified or text says "values not important", use $1 per unit for all routes**
 10. **CRITICAL: ALWAYS extract all available data. If something looks wrong (negative capacity, missing data), extract what you can AND add an "error" field describing the issue. DO NOT return error-only JSON**
-11. All numbers must be numeric types, not strings
+11. All numbers must be numeric LITERALS, not strings and not expressions.
+    Do the arithmetic yourself: write the evaluated number (e.g. 225), never
+    write `90 * 2.5` or `90*2.5` in the JSON. JSON does not allow expressions.
 """
 
         user = f"TRANSPORTATION PROBLEM:\n{description}\n\nReturn ONLY the JSON."
