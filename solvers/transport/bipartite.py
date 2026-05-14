@@ -15,12 +15,27 @@ Does NOT support:
 - Arc capacity limits
 """
 
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional, Tuple
 from pyomo.environ import (
-    ConcreteModel, Set, Param, Var, NonNegativeReals,
-    Objective, Constraint, minimize, value, SolverFactory
+    ConcreteModel, Set, Param, Var, NonNegativeReals, Integers, Binary,
+    Objective, Constraint, minimize, value, TransformationFactory,
 )
+from pyomo.core.base.var import VarData
+from pyomo.contrib.appsi.solvers.highs import Highs
 from ..base import OptimizationSolver
+
+
+def _model_has_integer_vars(model: ConcreteModel) -> bool:
+    """True if any variable in the model has an integer or binary domain.
+
+    Used to gate warm-start: HiGHS LP solver doesn't benefit from a primal
+    warm-start (dual simplex from scratch is faster), so we only seed values
+    when the model is actually a MIP.
+    """
+    for v in model.component_data_objects(Var, descend_into=True):
+        if v.is_integer() or v.is_binary():
+            return True
+    return False
 
 
 class BipartiteTransportSolver(OptimizationSolver):
@@ -205,82 +220,144 @@ class BipartiteTransportSolver(OptimizationSolver):
 
         return m
 
-    def solve(self, params: Dict[str, Any]) -> Dict[str, Any]:
+    def solve(
+        self,
+        params: Dict[str, Any],
+        warm_start: Optional[Dict[Tuple[str, str], float]] = None,
+        time_limit: float = 60.0,
+        gap_target: float = 0.01,
+    ) -> Dict[str, Any]:
         """
-        Build and solve the bipartite transportation model using Pyomo + GLPK.
+        Build and solve the bipartite transportation model using Pyomo + HiGHS.
 
         Args:
-            params: Problem parameters (plants, markets, capacity, demand, distance, freight)
+            params:      problem parameters (plants, markets, capacity, demand,
+                         distance, freight or cost)
+            warm_start:  optional dict {(plant, market): flow_value} used to seed
+                         the solver — comes from the VAM heuristic.
+            time_limit:  hard time limit in seconds.
+            gap_target:  acceptable relative MIP gap (passed to HiGHS as
+                         mip_rel_gap; no-op for pure LP).
 
         Returns:
             {
                 "status": "OPTIMAL" | "INFEASIBLE" | ...,
                 "solver_id": "transport_basic_bipartite",
-                "objective": float,
-                "objective_thousand_usd": float (for backward compatibility),
-                "flows": [{"plant": str, "market": str, "value": float}, ...],
-                "kpis": {"total_by_plant": {...}, "total_by_market": {...}}
+                "objective_value": float,
+                "objective": float (backcompat),
+                "objective_thousand_usd": float (backcompat),
+                "best_bound": float | None,    # HiGHS dual bound
+                "gap": float | None,           # |obj - bound| / |obj|
+                "flows": [{"plant", "market", "value"}],
+                "kpis": {"total_by_plant", "total_by_market"},
+                "warm_started": bool,
             }
         """
-        # Validate
         errors = self.validate_params(params)
         if errors:
             return {
                 "status": "VALIDATION_ERROR",
                 "solver_id": self.solver_id,
-                "errors": errors
+                "errors": errors,
             }
 
-        # Build model
         m = self.build_model(params)
 
-        # Solve
-        solver = SolverFactory("glpk")
-        res = solver.solve(m, tee=False)
+        warm_start_applied = False
+        if warm_start and _model_has_integer_vars(m):
+            valid_keys = {(ii, jj) for ii in m.I for jj in m.J}
+            for (i, j), v in warm_start.items():
+                if (str(i), str(j)) in valid_keys:
+                    m.x[str(i), str(j)].value = float(v)
+            warm_start_applied = True
 
-        status = str(res.solver.termination_condition).upper()
+        solver = Highs()
+        solver.config.time_limit = time_limit
+        solver.config.load_solution = True
+        solver.highs_options = {"mip_rel_gap": gap_target}
+        res = solver.solve(m)
 
-        # Only extract results if solution is OPTIMAL
-        if status == 'OPTIMAL':
-            # Extract results (JSON-safe)
+        status = str(res.termination_condition).upper().split(".")[-1]
+
+        if status == "OPTIMAL":
             flows_list = [
                 {"plant": str(i), "market": str(j), "value": float(value(m.x[i, j]))}
                 for i in m.I for j in m.J
             ]
             objective_val = float(value(m.OBJ))
+            best_bound = (
+                float(res.best_objective_bound)
+                if res.best_objective_bound is not None else None
+            )
+            gap = (
+                abs(objective_val - best_bound) / abs(objective_val)
+                if best_bound is not None and objective_val != 0 else 0.0
+            )
 
             total_by_plant = {
-                str(i): float(sum(value(m.x[i, j]) for j in m.J))
-                for i in m.I
+                str(i): float(sum(value(m.x[i, j]) for j in m.J)) for i in m.I
             }
             total_by_market = {
-                str(j): float(sum(value(m.x[i, j]) for i in m.I))
-                for j in m.J
+                str(j): float(sum(value(m.x[i, j]) for i in m.I)) for j in m.J
             }
 
             return {
                 "status": status,
                 "solver_id": self.solver_id,
-                "objective_value": objective_val,  # Standard key name
-                "objective": objective_val,  # backward compatibility
-                "objective_thousand_usd": objective_val,  # backward compatibility
+                "objective_value": objective_val,
+                "objective": objective_val,
+                "objective_thousand_usd": objective_val,
+                "best_bound": best_bound,
+                "gap": gap,
                 "flows": flows_list,
                 "kpis": {
                     "total_by_plant": total_by_plant,
-                    "total_by_market": total_by_market
-                }
+                    "total_by_market": total_by_market,
+                },
+                "warm_started": warm_start_applied,
             }
-        else:
-            # Return status without trying to extract uninitialized values
-            return {
-                "status": status,
-                "solver_id": self.solver_id,
-                "objective": None,
-                "objective_thousand_usd": None,
-                "flows": [],
-                "kpis": {},
-                "message": f"Solver terminated with status: {status}"
-            }
+
+        return {
+            "status": status,
+            "solver_id": self.solver_id,
+            "objective_value": None,
+            "objective": None,
+            "objective_thousand_usd": None,
+            "best_bound": None,
+            "gap": None,
+            "flows": [],
+            "kpis": {},
+            "warm_started": warm_start_applied,
+            "message": f"Solver terminated with status: {status}",
+        }
+
+    def solve_lp_relaxation(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Solve the LP relaxation of the transportation model and return the bound.
+
+        For the current bipartite formulation (continuous vars), this is the
+        model itself — the bound equals the LP optimum. Phase 2 (scheduling
+        with integer vars) is where relaxation actually loosens the model.
+
+        Returns:
+            {"status": str, "bound": float | None}
+        """
+        errors = self.validate_params(params)
+        if errors:
+            return {"status": "VALIDATION_ERROR", "bound": None, "errors": errors}
+
+        m = self.build_model(params)
+        # Relax any integer/binary vars in the model (no-op today, future-proof).
+        TransformationFactory("core.relax_integer_vars").apply_to(m)
+
+        solver = Highs()
+        solver.config.load_solution = True
+        res = solver.solve(m)
+        status = str(res.termination_condition).upper().split(".")[-1]
+
+        if status == "OPTIMAL":
+            return {"status": status, "bound": float(value(m.OBJ))}
+        return {"status": status, "bound": None}
 
     def _normalize_distance(self, distance: Dict[str, Any]) -> Dict[tuple, float]:
         """

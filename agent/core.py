@@ -26,6 +26,13 @@ from solvers import get_solver, list_problem_types
 from analysis.detector import AnalysisDetector
 from analysis.engine import AnalysisEngine
 from analysis import detect_analysis_type, execute_analysis, format_analysis_output
+from .heuristic_handler import (
+    heuristic_mode_supported,
+    is_scheduling,
+    run_heuristic_for_scheduling,
+    run_heuristic_for_transport,
+)
+from .job_store import default_store as default_job_store, JobStore
 
 class OptimizationAgent:
     """
@@ -35,12 +42,13 @@ class OptimizationAgent:
     coordinates all the other components (LLM, solvers, analysis engines).
     """
 
-    def __init__(self, llm_client: LLMClient):
+    def __init__(self, llm_client: LLMClient, job_store: Optional[JobStore] = None):
         self.llm = llm_client
         self.intent_router = IntentRouter(llm_client)
         self.follow_up_handler = FollowUpHandler(llm_client)
         self.analysis_detector = AnalysisDetector(llm_client)
         self.analysis_engine = AnalysisEngine()
+        self.job_store = job_store if job_store is not None else default_job_store
 
         # Conversation state
         self.conversation_context = {
@@ -49,7 +57,13 @@ class OptimizationAgent:
             "analysis_history": []
         }
 
-    def solve_natural_language(self, description: str, progress_callback=None, conversation_context: Optional[Dict] = None) -> Dict[str, Any]:
+    def solve_natural_language(
+        self,
+        description: str,
+        progress_callback=None,
+        conversation_context: Optional[Dict] = None,
+        mode: str = "exact",
+    ) -> Dict[str, Any]:
         """
         Main entry point for natural language problem solving with intent routing.
 
@@ -211,6 +225,27 @@ class OptimizationAgent:
                     "message": "The problem is infeasible. Please provide modifications to fix it, or provide a complete new problem description."
                 }
 
+            # Step 4.6: Mode routing — heuristic modes short-circuit the exact
+            # solve and persist the job so /continue can warm-start later.
+            if mode in ("heuristic", "heuristic_then_ask"):
+                if heuristic_mode_supported(problem_type):
+                    update_progress("Running heuristic...", 70)
+                    handler = (
+                        run_heuristic_for_scheduling
+                        if is_scheduling(problem_type)
+                        else run_heuristic_for_transport
+                    )
+                    return handler(
+                        params=params,
+                        description=description,
+                        problem_type=problem_type,
+                        solver_id=solver_id,
+                        classification=classification,
+                        job_store=self.job_store,
+                        ask_to_continue=(mode == "heuristic_then_ask"),
+                    )
+                # Heuristic unsupported for this domain — fall through to exact.
+
             update_progress("Solving optimization problem...", 70)
 
             # Step 5: Solve the problem
@@ -300,6 +335,101 @@ class OptimizationAgent:
                     "problem_type": "UNKNOWN",
                     "confidence": 0.0
                 }
+
+    def continue_job(self, job_id: str, action: str) -> Dict[str, Any]:
+        """
+        Resume a job that was started in heuristic mode.
+
+        Args:
+            job_id: UUID returned by a prior heuristic-mode /solve call.
+            action: one of "optimize" | "accept" | "use_heuristic".
+                - optimize: run the exact solver, warm-started from the
+                  stored heuristic flows. Returns the proven-optimal answer.
+                - accept / use_heuristic: terminal acknowledgement; we return
+                  the stored heuristic answer and drop the job.
+
+        Returns:
+            Dict shaped like the API solve responses. On unknown / expired
+            job_id, returns {"success": False, "error": "..."}.
+        """
+        record = self.job_store.get(job_id)
+        if record is None:
+            return {
+                "success": False,
+                "error": f"Job {job_id} not found or expired (10-minute TTL).",
+            }
+
+        action = (action or "").lower()
+        if action not in {"optimize", "accept", "use_heuristic"}:
+            return {
+                "success": False,
+                "error": f"Unknown action '{action}'. Expected one of: "
+                         "optimize, accept, use_heuristic.",
+            }
+
+        if action in ("accept", "use_heuristic"):
+            self.job_store.drop(job_id)
+            solution: Dict[str, Any] = {
+                "status": "ACCEPTED_HEURISTIC",
+                "objective_value": record.heuristic_cost,
+                "objective": record.heuristic_cost,
+                "best_bound": record.lp_bound,
+                "gap": (
+                    (record.heuristic_cost - record.lp_bound) / record.heuristic_cost
+                    if record.lp_bound is not None and record.heuristic_cost > 0
+                    else None
+                ),
+                "is_heuristic": True,
+            }
+            # Domain-specific payload: scheduling stores a dict, transport
+            # stores (i,j) flows.
+            if isinstance(record.heuristic_flows, dict) and "assignment" in record.heuristic_flows:
+                w = record.heuristic_flows
+                solution["assignments"] = [
+                    {"order": o, "unit": u} for o, u in w["assignment"].items()
+                ]
+                solution["sequence"] = w["sequence"]
+                solution["completion"] = w["completion"]
+                solution["Cmax"] = w["cmax"]
+            else:
+                solution["flows"] = [
+                    {"plant": str(i), "market": str(j), "value": float(v)}
+                    for (i, j), v in record.heuristic_flows.items()
+                ]
+            return {
+                "success": True,
+                "type": "heuristic_accepted",
+                "job_id": job_id,
+                "problem_type": record.problem_type,
+                "solution": solution,
+                "message": f"Heuristic answer accepted: cost {record.heuristic_cost:.2f}.",
+            }
+
+        # action == "optimize": warm-started exact solve.
+        solver = get_solver(record.solver_id)
+        solution = solver.solve(record.params, warm_start=record.heuristic_flows)
+        self.job_store.drop(job_id)
+
+        explanation_result = self.llm.explain_solution(
+            solution, record.problem_type, record.description
+        )
+
+        return {
+            "success": True,
+            "type": "exact_after_heuristic",
+            "job_id": job_id,
+            "problem_type": record.problem_type,
+            "confidence": record.classification.get("confidence"),
+            "extracted_params": record.params,
+            "solution": solution,
+            "heuristic_baseline": {
+                "cost": record.heuristic_cost,
+                "lp_bound": record.lp_bound,
+            },
+            "explanation": explanation_result.get("explanation", ""),
+            "summary": explanation_result.get("summary", ""),
+            "units_info": explanation_result.get("units_info", {}),
+        }
 
     def _handle_follow_up(self, message: str, conversation_context: Dict, update_progress) -> Dict[str, Any]:
         """

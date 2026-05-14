@@ -664,3 +664,162 @@ every K seconds / nodes:
 - For one solvable problem type (transport), the agent can: run heuristic → warm-start MILP → report incremental gap → accept user decision → return final answer.
 - Eval framework can compare `heuristic_only`, `heuristic+milp`, `cold_milp` on the same 100 round-trip instances.
 - README documents the new interactive checkpoint with one concrete example.
+
+---
+
+# 🔒 LOCKED PLAN (2026-05-14): Heuristic + warm-start, Phase 1 = transport
+
+This is the consolidated plan after the design session on 2026-05-14. It supersedes
+the open questions above. Implementation starts here.
+
+## Goal
+
+Give users a **fast feasible answer** quickly, then let them ask for the
+**proven-optimal answer** via chat. Two-call protocol — no streaming.
+
+## Why
+- Exact MILP is slow on bigger instances → bad demo UX.
+- Mirrors how a human OR consultant works: "here's a good plan now; if you want
+  me to squeeze out the last 5%, I can run longer."
+- Surfaces real OR concepts (gap, dual bound, incumbent) in plain English —
+  that's the entire thesis of the project.
+
+## Resolved design decisions
+
+| Question | Decision | Why |
+|---|---|---|
+| Solver | **HiGHS everywhere** via Pyomo `appsi_highs`, drop GLPK | Proper MIP warm-start, faster on every benchmark, open-source |
+| Interactive UX | **Two-call protocol** (`/solve` + `/continue`), no streaming | Simpler; live callbacks not needed |
+| Progress callbacks | **Not used.** Pyomo post-solve metrics are enough | Two-call doesn't need mid-solve updates; avoids dropping to raw `highspy` |
+| Heuristic algorithm (transport) | **Vogel's Approximation Method (VAM)** | Near-optimal on classic transport instances, well-known in OR, ~80 lines |
+| LP relaxation | **Run on heuristic call** | Gives lower bound → "your quick answer is X% from optimum" framing |
+| MILP time limit | **60s** | Phase 1 demo default |
+| Gap target | **1%** | Industry standard "essentially optimal"; rarely matters below given noisy data |
+| Job storage | **In-memory dict, UUID-keyed, 10-min TTL** | Phase 1 doesn't need durability; restart losing in-flight jobs is acceptable |
+| Eval framework | **Untouched** — exact MILP only, no warm-start path | Ground-truth comparison must be deterministic; interim solutions would make `gap == 0.0` flaky |
+| Heuristic tests | **New surface under `tests/`** (not `evals/`) | Separate concern from round-trip eval |
+| Scope | **Transport first, scheduling reuses scaffolding** | De-risk on the easier domain (bipartite assignment) |
+
+## Architecture
+
+**Solver layer**
+- `solvers/transport/bipartite.py` gains `solve(params, warm_start=None,
+  time_limit=60, gap_target=0.01)`. When `warm_start` is given, populate
+  `model.x[i,j].value` and call solve with `warmstart=True`.
+
+**Heuristic layer (new)**
+- `solvers/heuristics/transport_vam.py` — VAM implementation. Returns
+  `(solution_dict, heuristic_cost)`.
+
+**Bound layer**
+- LP relaxation helper, solved on the heuristic call.
+
+**API layer (`api.py`) — two-call protocol**
+- `POST /solve` with `mode ∈ {heuristic, exact, heuristic_then_ask}`:
+  - `heuristic`: VAM + LP bound → return solution + gap-vs-bound + `job_id`
+  - `exact`: skip heuristic, run MILP to 1% gap or 60s
+  - `heuristic_then_ask`: VAM result + chat prompt "improve / accept / stop?"
+- `POST /continue` with `job_id` and `action ∈ {optimize, accept, use_heuristic}`:
+  - `optimize`: warm-start MILP from stored heuristic, return final
+  - `accept` / `use_heuristic`: terminal, return what we have
+
+**Agent layer**
+- `agent/core.py` `solve_natural_language` routes by mode.
+- `IntentRouter` learns `follow_up_type="solver_progress"`.
+- New reasoning prompt explains "1% optimality gap" to non-OR users.
+
+## Implementation order (de-risked)
+
+1. **Spike (1h)**: swap GLPK→HiGHS in existing transport solver, confirm
+   warm-start round-trips end-to-end with a hand-crafted starting solution,
+   confirm post-solve metrics report what we expect. **Gate**: if this fails,
+   redesign before going further.
+2. **VAM heuristic** in `solvers/heuristics/transport_vam.py` + unit tests on
+   tiny instances with known optimum.
+3. **`bipartite.py` warm-start parameter** + LP relaxation helper.
+4. **Two-call API** in `api.py` + in-memory job store.
+5. **Agent integration** in `agent/core.py` — mode routing + follow-up handler.
+6. **LLM prompts** — intent classification for "improve/accept/stop", gap
+   explanation in reasoning specialist.
+7. **Heuristic test surface** under `tests/`.
+8. **Demo pass** end-to-end: NL problem → heuristic → "improve" → optimum.
+
+Then Phase 2 (scheduling) reuses the same scaffolding with LPT + swap moves.
+
+## Explicitly NOT doing in Phase 1
+
+- No streaming / SSE
+- No live progress callbacks (no `solvers/progress.py`)
+- No Redis / persistence
+- No raw `highspy` calls
+- No multi-objective, no constraint relaxation, no parallel runs
+- No touching the eval framework's exact-MILP path
+
+## Findings from spike + stress test (2026-05-14)
+
+**Warm-start is gated on integer var presence.** Pure-LP transport (current
+`bipartite.py`) does NOT benefit from primal warm-start — HiGHS dual simplex
+from cold is consistently equal or faster than crashing a basis from a primal
+solution. So `BipartiteTransportSolver.solve(warm_start=...)` auto-skips warm
+seeding when no Integer/Binary vars are present.
+
+**Where warm-start actually pays off:** MIPs. Spike on a fixed-charge transport
+MIP showed 6.6× speedup (0.079s → 0.012s). Phase 2 scheduling (true MIP with
+integer assignment vars) is where the warm-start narrative becomes the headline.
+
+**VAM gap on random-cost instances is 10–45%, not the textbook "near-optimal."**
+Random uniform costs have no exploitable structure. Real-world geographic
+distance-based costs will produce tighter gaps. We surface the LP bound to the
+user so the gap is always visible — no false claims.
+
+**VAM perf:** numpy vectorized implementation runs at ~3s for 400×800 (was
+~51s with pure-Python). On 800×1600 it's 28s — for very large pure-LP transport
+HiGHS cold solve (24s) is actually slightly faster than VAM. This is expected
+for pure LP; the two-call UX still has value (bound reporting, conversation
+hook) but the *speedup* story belongs to Phase 2 MIP.
+
+**Phase 1 transport story (refined):** the value isn't solver speedup. It's:
+1. Interactive UX (heuristic answer → user reacts → optimize on demand).
+2. LP bound visibility ("your quick answer is X% from optimum").
+3. Plumbing that becomes load-bearing the moment we add fixed-charge transport
+   or move to scheduling MIP.
+
+## Phase 2 done (2026-05-14): scheduling heuristic + warm-start
+
+Same scaffolding extended to single-stage IPM scheduling:
+
+- `solvers/heuristics/scheduling_lpt.py` — LPT (Longest Processing Time)
+  greedy assignment with eligibility + per-(order, unit) processing times +
+  changeover-aware completion times. Produces a complete primal solution
+  (assignment + sequence + completion + Cmax) suitable for warm-starting the
+  MILP.
+- `solvers/scheduling/single_stage_ipm.py` swapped from GLPK to HiGHS; accepts
+  `warm_start`, `time_limit`, `gap_target`. Warm-start seeds every Y, XX, C,
+  and Cmax. Same `_model_has_integer_vars` gate as transport — passes here
+  because the scheduling model IS MIP.
+- `agent/heuristic_handler.py` dispatches to scheduling when the classifier
+  returns `SCHEDULING` / `SINGLE_STAGE_SCHEDULING` / `PARALLEL_MACHINE_SCHEDULING`
+  / `SINGLE_MACHINE_MAKESPAN`.
+- 6 new unit tests under `tests/test_heuristics_scheduling.py` cover
+  feasibility, eligibility-respect, warm-start matching cold MILP, LPT as
+  upper bound, and changeover handling.
+
+**Scheduling warm-start payoff (random adversarial instances):**
+
+| Size | Cold MILP | Warm MILP | LPT Cmax | Optimal Cmax |
+|---|---|---|---|---|
+| 6 orders × 3 units | 87ms | 63ms (1.38×) | 16.0 | 16.0 |
+| 10 orders × 3 units | 1.2s | 1.2s (1.0×) | 18.0 | 15.0 |
+| 12 orders × 4 units | >30s | >30s (1.0×) | 16.0 | 14.0 |
+
+At 12×4 both runs hit the time limit without proving optimum. The IPM
+formulation has O(n² × m) precedence variables so problems blow up quickly;
+on adversarial random instances the warm-start doesn't reliably accelerate the
+proof. Real structured scheduling instances (industrial workloads with
+exploitable due-date / changeover patterns) typically benefit more.
+
+**LP relaxation for scheduling is stubbed** — `solve_lp_relaxation` returns
+`NOT_IMPLEMENTED`. Adding it requires factoring `build_model` out of `solve`.
+For Phase 2 MVP we omit the bound from the chat response and rely on the
+heuristic Cmax as the headline number plus the exact solver's
+`best_objective_bound` after `/continue optimize`.

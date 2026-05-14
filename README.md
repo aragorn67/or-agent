@@ -14,7 +14,7 @@ the agent:
 2. Classifies the problem family (transportation, scheduling, ...) using a JSON-schema-bound classifier with majority voting.
 3. Routes to the matching specialist extractor, which converts prose to a typed parameter dict.
 4. Runs a three-layer feasibility check (structural → problem-specific necessary conditions → solver-based) before invoking the solver, so hallucinated parameters do not silently corrupt the result.
-5. Solves with Pyomo + GLPK and returns the objective value, flows, and KPIs.
+5. Solves with Pyomo + HiGHS and returns the objective value, flows, and KPIs.
 6. Generates a plain-language explanation of the solution.
 
 Follow-up questions ("what if Boston's capacity drops by 30%?", "show me a sensitivity analysis on freight cost") are handled in-context against the previous solution.
@@ -46,7 +46,7 @@ natural language input
         │ (feasible)
         ▼
 ┌──────────────────────────┐
-│  Solver (Pyomo + GLPK)   │ bipartite transport | single-stage scheduling
+│  Solver (Pyomo + HiGHS)  │ bipartite transport | single-stage scheduling
 └──────────────────────────┘
         │
         ▼
@@ -59,7 +59,7 @@ The LLM layer uses an abstract `LLMClient` interface so providers are swappable.
 
 ## Quickstart
 
-Requirements: Python 3.10+, a running [Ollama](https://ollama.com) instance with a chat model available, and the `glpsol` binary on PATH.
+Requirements: Python 3.10+, a running [Ollama](https://ollama.com) instance with a chat model available. The solver (HiGHS) is pulled in via the `highspy` wheel — no external binary required.
 
 ```bash
 # 1. clone and set up the environment
@@ -68,10 +68,7 @@ cd or-agent
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-# 2. install GLPK (Ubuntu/Debian)
-sudo apt install glpk-utils
-
-# 3. pull the LLM
+# 2. pull the LLM
 ollama pull qwen3:14b
 
 # 4. one-shot solve from Python
@@ -100,7 +97,13 @@ CLASSIFICATION_MODEL=qwen3:8b EXTRACTION_MODEL=qwen3:14b REASONING_MODEL=qwen3:1
 
 ### REST API
 
-A FastAPI server is included. The primary endpoint is `POST /solve` (alias `POST /solve/natural`) which accepts `{"description": "..."}` and returns the agent's solution dict. Auxiliary endpoints: `GET /health`, `GET /capabilities`, `POST /agent/classify`.
+A FastAPI server is included. Primary endpoints:
+
+- `POST /solve` (alias `POST /solve/natural`) — accepts `{"description": "...", "mode": "exact|heuristic|heuristic_then_ask"}`. Default mode is `exact`.
+- `POST /continue` — `{"job_id": "...", "action": "optimize|accept|use_heuristic"}` resumes a job started in heuristic mode.
+- `POST /chat/continue` — same as `/continue` but accepts a free-text `message` ("make it better", "good enough") that is mapped to an action.
+
+Auxiliary: `GET /health`, `GET /capabilities`, `POST /agent/classify`.
 
 ```bash
 uvicorn api:app --host 0.0.0.0 --port 8000
@@ -124,6 +127,24 @@ A `Dockerfile` is included for hosted deployment. For a zero-cost demo the API c
 ```bash
 cloudflared tunnel --url http://localhost:8000   # yields an ephemeral https://*.trycloudflare.com URL
 ```
+
+### Interactive heuristic + warm-start
+
+Larger optimization instances can be slow if the exact MILP runs to optimality. The two-call protocol gives the user a fast feasible answer first, then lets them opt in to the proven-optimal answer:
+
+```bash
+# 1. Quick answer: VAM heuristic + LP relaxation bound + prompt
+curl -s -X POST http://localhost:8000/solve -H 'content-type: application/json' \
+  -d '{"description": "...transport problem...", "mode": "heuristic_then_ask"}'
+# → returns {job_id, solution (heuristic), best_bound, gap, follow_up_prompt}
+
+# 2. Free-text reply maps to action (parser handles "make it better", "good enough", etc.)
+curl -s -X POST http://localhost:8000/chat/continue -H 'content-type: application/json' \
+  -d '{"job_id": "<UUID from step 1>", "message": "can you make it better"}'
+# → warm-starts the exact solver from the heuristic; returns proven-optimal answer.
+```
+
+Heuristic mode is currently supported for transportation (Vogel's Approximation Method). The warm-start path is gated on integer variables — pure-LP transport just solves cold; the speedup payoff lands on MIP problems such as scheduling.
 
 ## Evaluation
 
@@ -174,15 +195,16 @@ Caveat: synthetic random problems with feasibility margins built in are the easy
 ## Project status
 
 **Works today:**
-- Bipartite single-commodity transportation (Pyomo + GLPK)
+- Bipartite single-commodity transportation (Pyomo + HiGHS)
 - Single-stage scheduling (IPM-based makespan)
 - Three-layer feasibility checking with diagnostic suggestions
 - Sensitivity / what-if / re-solve follow-up analysis on transportation
 - Round-trip eval framework for both transportation and single-stage scheduling
+- Interactive heuristic + warm-start (VAM for transport) with LP bound reporting and a two-call API protocol (`/solve mode=heuristic_then_ask` → `/chat/continue`)
 
 **On the roadmap** (see [`brainstorm_ideas.md`](brainstorm_ideas.md) for detail):
 - Metamorphic transforms layered on the eval (double-costs → double-objective, permute plants → same objective, etc.)
-- Metaheuristic warm-start with interactive optimality-gap checkpoint
+- Scheduling heuristic + warm-start (LPT for makespan) — same scaffolding as transport, where MIP warm-start delivers real speedup
 - CSV/Excel data loaders
 - Decomposition strategies (Benders, Dantzig-Wolfe) for large MILPs
 
