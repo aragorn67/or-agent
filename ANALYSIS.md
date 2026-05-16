@@ -312,3 +312,60 @@ every opened route to the reported/stored heuristic cost. The fixed-charge
 demo now reports cost 1660, gap 0.0 ("provably optimal"), consistent
 through the optimize/accept paths. +1 regression test in
 test_heuristic_two_call.py (10 there; full follow-up/heuristic suites green).
+
+---
+
+## 2026-05-16 — Phase 1: live progress (job + poll)
+
+**Problem.** A blocking `POST /solve` hid ~2-3 min of local-LLM work behind
+one spinner — the single worst thing in the demo.
+
+**Solution.** The agent already emitted stages via its
+`update_progress(step, percent)` callback (never surfaced — `/solve` passed
+no callback). Added a thread-safe `ProgressStore` (UUID runs, stages, result,
+15-min TTL); `POST /jobs` runs `solve_natural_language` in a daemon thread
+feeding the callback into the store and returns a `run_id` immediately;
+`GET /jobs/{run_id}` returns live stages + the full payload once done.
+`chat.html` polls (900 ms) and renders a ✓/⏳ pipeline checklist, then runs
+the existing result rendering — the heuristic continuation `job_id` survives
+the async round-trip untouched. `POST /solve` kept synchronous for
+back-compat.
+
+**Verification.** 5 tests in `test_progress_jobs.py` (store lifecycle/error/
+TTL + end-to-end TestClient flow with solve stubbed); 26 across the Phase-1
++ related suites green. Live smoke: stages stream in real time
+(`Detecting intent...` → `Analyzing problem type...` → …) while running.
+
+## 2026-05-16 — Phase 2: first-message analysis-intent dead-end
+
+**Problem.** A what-if / sensitivity / resolve / pareto request as the
+*first* message has no solved baseline. The follow-up branch is skipped
+(no `last_solution`), so it was misrouted into the solver pipeline and
+dead-ended with a cryptic "not supported by our solvers" (`core.py`
+`solver_id == "none"`) or "Parameter extraction failed" — unactionable.
+
+**Solution.** New `OptimizationAgent._analysis_needs_baseline(desc, ctx,
+allow_data_rich)`: keyword-only `detect_analysis_type` (no LLM), gated on
+no `last_solution`/`last_infeasibility`. Returns a conversational guide
+(`type: "analysis_no_baseline"`) that explains a what-if needs a baseline
+and shows a concrete example. Wired in three places:
+(1) early gate before the optimization pipeline with
+`allow_data_rich=False` — only short-circuits the *bare* case (number/
+length heuristic lets a full problem stated as a what-if through),
+saving ~2 LLM calls; (2) + (3) post-failure net at the `solver_id ==
+"none"` and extraction-failure returns with `allow_data_rich=True`,
+converting both dead-ends to the guide. `chat.html`: first-message
+success branch now renders `d.response` when there's no `d.solution`
+(also fixes a pre-existing smalltalk/help-as-first-message NaN-card bug).
+
+**Verification.** 7 tests in `test_first_message_analysis.py` (helper in
+isolation: bare what-if/sensitivity/pareto, baseline-present pass-through,
+non-analysis pass-through, data-rich early/late behaviour; + integration
+through `solve_natural_language` with intent stubbed). 32 across related
+suites green. Live smoke: first-message "what if I increase plant
+capacity by 20%?" returns the guide in ~12s (one `detect_intent` LLM
+call) instead of the full pipeline + cryptic error.
+
+**Possible follow-up.** Early gate runs *after* `detect_intent`'s LLM
+call; moving the keyword check ahead of it would make this path fully
+LLM-free (~0s). Deferred — micro-opt on an error path, not the happy path.

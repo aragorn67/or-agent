@@ -168,6 +168,41 @@ function stopTyping(){
   typing.classList.remove('show');
 }
 
+// ---- live pipeline (async job poll) ----
+let pollTimer = null;
+function renderPipeline(stages, secs){
+  const lines = stages.map((st, i) => {
+    const last = i === stages.length - 1;
+    return (last ? '⏳ ' : '✓ ') + st.step + (last ? `  (${secs}s)` : '');
+  });
+  typing.classList.add('show');
+  typing.innerHTML = '🤖 <b>Working…</b><br>' + lines.join('<br>');
+}
+function stopPipeline(){
+  if (pollTimer){ clearInterval(pollTimer); pollTimer = null; }
+  typing.classList.remove('show');
+}
+// Polls GET /jobs/{id}; resolves with the solve payload on done/error,
+// or null on timeout. Drives the live checklist while it waits.
+function pollPipeline(runId, t0){
+  const MAX_MS = 6 * 60 * 1000;
+  return new Promise((resolve) => {
+    pollTimer = setInterval(async () => {
+      const secs = Math.round((Date.now() - t0) / 1000);
+      if (Date.now() - t0 > MAX_MS){ stopPipeline(); resolve(null); return; }
+      try {
+        const j = await (await fetch('/jobs/' + runId)).json();
+        if (j.stages && j.stages.length) renderPipeline(j.stages, secs);
+        if (j.state === 'done'){ stopPipeline(); resolve(j.result); }
+        else if (j.state === 'error'){
+          stopPipeline();
+          resolve(j.result || { success:false, error:j.error });
+        }
+      } catch (e) { /* transient — keep polling */ }
+    }, 900);
+  });
+}
+
 async function send(){
   const text = input.value.trim();
   if (!text) return;
@@ -177,15 +212,31 @@ async function send(){
 
   try {
     if (jobId === null) {
-      startTyping('Classifying & solving heuristically…');
-      const r = await fetch('/solve', {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ description:text, mode:'heuristic_then_ask' })
-      });
-      const d = await r.json();
-      stopTyping();
-      if (!d.success) {
+      // Async job + live pipeline poll — turns the ~2-min dead-air into
+      // visible classify→extract→solve progress.
+      typing.classList.add('show');
+      typing.innerHTML = '🤖 Starting…';
+      let runId = null;
+      try {
+        const jr = await fetch('/jobs', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ description:text, mode:'heuristic_then_ask' })
+        });
+        runId = (await jr.json()).run_id;
+      } catch (e) { /* handled below */ }
+
+      const d = runId ? await pollPipeline(runId, Date.now()) : null;
+      stopPipeline();
+
+      if (!d) {
+        addMsg('❌ The solve could not start or timed out.', 'agent');
+      } else if (!d.success) {
         addMsg('❌ ' + (d.error || JSON.stringify(d)), 'agent');
+      } else if (!d.solution) {
+        // Conversational reply with no solution to render — a first-message
+        // what-if guide, smalltalk, or help. Show the text plainly instead
+        // of a broken card with NaN cost.
+        addMsg(d.response || d.summary || 'Done.', 'agent');
       } else {
         const s = d.solution || {};
         const gap = s.gap != null ? (s.gap*100).toFixed(4)+'%' : 'n/a';

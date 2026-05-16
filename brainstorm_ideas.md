@@ -944,3 +944,99 @@ Phase 1 (must-have) → Phase 2 → Phase 3. Phase 1 alone transforms the demo.
 Map approved and recorded. **Nothing built yet** — next session starts at
 Phase 0. Session work prior to this (fixed-charge MIP + UI + extraction)
 is still uncommitted; Phase 0 commits it first.
+
+---
+
+# 🔖 Status update (2026-05-16) — read this first next session
+
+Significant progress since the 2026-05-15 roadmap. Updated map below.
+
+## Shipped this session (2026-05-16)
+
+- **Roadmap #8 — fully done.** Free-text what-if / sensitivity / resolve /
+  pareto follow-ups now re-solve and answer. Highlights:
+  - `follow_up_on_job()` answers what-ifs against a *pending*
+    heuristic_then_ask job without consuming it; `/chat/continue` falls
+    back to it instead of dead-ending on non-action messages.
+  - Fixed a latent bug: `_handle_follow_up_analysis` used the problem-type
+    *category* as a solver_id → always raised "Unsupported solver_id".
+  - Infeasible what-ifs return plain-language "why + how to fix", not a
+    cryptic "failed at layer N".
+  - Perf: keyword-only analysis-type detection in the routing gate, type
+    passed downstream — a what-if dropped from **3 qwen3 calls to 1**.
+- **Fixed-charge heuristic gap bug fixed.** Heuristic cost now includes the
+  fixed charge on every opened route (was variable-only → understated cost
+  → negative gap surfaced as a garbage ~9% gap).
+- **Demo deliverables built** (`deliverables/`): Overview PDF (exec summary
+  **+ technical deep dive + assumptions + future work**), Windows run guide
+  PDF, demo video (mp4 + webm source), HTML sources.
+- **setup.bat fixed** (qwen3:14b, no GLPK, fixed step numbering/doc refs).
+- Tests: `test_followup_whatif.py` (6) + fixed-charge heuristic regression
+  in `test_heuristic_two_call.py`; suites green. ANALYSIS.md updated.
+- **Commit message prepared but NOT committed** — work still uncommitted on
+  `main` (feature + 3 fixes + deliverables + setup.bat + ANALYSIS.md).
+
+## Roadmap status
+
+| Phase | State |
+|---|---|
+| Phase 0 — commit + deps | Commit msg ready, **not committed**. `openpyxl`/`pandas` **still missing** in `Tolis_Env` |
+| Phase 1 — live progress (job+poll UI) | **Not started.** Still the biggest demo win; everything rides on the job model |
+| Phase 2 — conversational polish | #8 **done**; remaining: first-message analysis-intent dead-end (`core.py:145`), #5 continuation chips (`next_options`), #6 Excel export |
+| Phase 3 — Excel fast path + latency profiling | Not started |
+
+Cut order unchanged: **Phase 1 → Phase 2 → Phase 3**.
+
+## Next session starts here (loose ends, in order)
+
+1. **Commit** the uncommitted work (message ready; on `main` — consider a
+   branch; decide on committing the `deliverables/` binaries vs gitignore).
+2. **Phase 0 deps:** `pip install openpyxl pandas` into `Tolis_Env`
+   (blocks all Excel work in Phase 2/3).
+3. **Phase 1 (recommended primary):** refactor `/solve` → job + poll,
+   surface existing `update_progress` stages via `GET /jobs/{id}/status`,
+   live pipeline checklist in `chat.html`.
+4. **Phase 2 remainder:** fix the first-message analysis-intent dead-end
+   (`solver_id == "none"` → hard stop at `core.py:145`; route/explain
+   instead); add #5 continuation chips; #6 `GET /jobs/{id}/export.xlsx`.
+5. **Phase 3:** `POST /solve/file` (.xlsx → params → solve, skips both
+   qwen3 calls) + per-stage latency profiling to ANALYSIS.md.
+
+## Update — Phase 1 DONE (2026-05-16, later same day)
+
+Phase 1 (live progress) shipped: `agent/progress_store.py`,
+`POST /jobs` + `GET /jobs/{run_id}`, live pipeline checklist in
+`chat.html`. `POST /solve` kept sync for back-compat. 5 tests in
+`test_progress_jobs.py`; smoke-verified stages stream live. **Uncommitted.**
+
+Revised loose-end order next session:
+1. Commit (brainstorm status edits + Phase 1: progress_store/api/chat.html
+   + test_progress_jobs.py + ANALYSIS.md).
+2. **Phase 2 remainder** (now primary): first-message analysis-intent
+   dead-end at `core.py:145` (route/explain instead of hard stop); #5
+   continuation chips (`next_options`); #6 `GET /jobs/{id}/export.xlsx`
+   (openpyxl/pandas now installed).
+3. **Phase 3:** `POST /solve/file` (.xlsx → params → solve, skips both
+   qwen3 calls) + per-stage latency profiling to ANALYSIS.md.
+
+## Update — Phase 2 dead-end DONE (2026-05-16, later same day)
+
+First-message analysis-intent dead-end fixed: new
+`_analysis_needs_baseline` returns a conversational guide instead of the
+`core.py` "not supported"/"extraction failed" hard stops; `chat.html`
+renders no-solution responses plainly. 7 tests in
+`test_first_message_analysis.py`; live smoke-verified. **Uncommitted**
+(stacks on the still-uncommitted Phase 1 work).
+
+Revised loose-end order next session:
+1. Commit (Phase 1 + Phase 2 dead-end + ANALYSIS/brainstorm edits).
+   Files: `agent/progress_store.py`, `agent/core.py`, `api.py`,
+   `templates/chat.html`, `tests/test_progress_jobs.py`,
+   `tests/test_first_message_analysis.py`, `ANALYSIS.md`,
+   `brainstorm_ideas.md`.
+2. **Phase 2 remainder:** #5 continuation chips (`next_options`);
+   #6 `GET /jobs/{id}/export.xlsx` (openpyxl/pandas installed).
+3. **Phase 3:** `POST /solve/file` (.xlsx → params → solve) +
+   per-stage latency profiling to ANALYSIS.md.
+4. *Optional micro-opt:* move keyword analysis check before
+   `detect_intent` so the bare-what-if path is fully LLM-free.

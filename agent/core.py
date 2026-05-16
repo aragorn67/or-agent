@@ -116,6 +116,17 @@ class OptimizationAgent:
                 update_progress("Handling follow-up question...", 10)
                 return self._handle_follow_up(description, conversation_context, update_progress)
 
+            # A what-if / sensitivity / resolve / pareto request as the FIRST
+            # message has no baseline to analyse. Misrouted to the solver
+            # pipeline it dead-ends ("not supported" / "extraction failed").
+            # Catch the obvious bare case early (saves ~2 LLM calls) and
+            # answer conversationally instead.
+            guide = self._analysis_needs_baseline(
+                description, conversation_context, allow_data_rich=False
+            )
+            if guide is not None:
+                return guide
+
             # Otherwise, process as optimization problem
             update_progress("Analyzing problem type...", 15)
 
@@ -140,6 +151,15 @@ class OptimizationAgent:
 
             # Check if we have a solver for this problem
             if solver_id == "none":
+                # A bare what-if/sensitivity that slipped past the early guard
+                # (data-rich enough to classify, too thin to solve) lands here.
+                # Prefer the conversational baseline guide over the cryptic
+                # "not supported by our solvers".
+                guide = self._analysis_needs_baseline(
+                    description, conversation_context, allow_data_rich=True
+                )
+                if guide is not None:
+                    return guide
                 return {
                     "success": False,
                     "error": f"Problem type '{problem_type}' is recognized but not yet supported by our solvers.",
@@ -159,6 +179,15 @@ class OptimizationAgent:
 
             # Check if LLM extraction failed
             if "error" in params:
+                # Most common cause of a first-message extraction failure is a
+                # what-if with no underlying problem to extract from. Answer
+                # with the baseline guide rather than a structural-infeasible
+                # error the user can't act on.
+                guide = self._analysis_needs_baseline(
+                    description, conversation_context, allow_data_rich=True
+                )
+                if guide is not None:
+                    return guide
                 return {
                     "success": False,
                     "status": "infeasible",  # Extraction failure = structural infeasibility
@@ -473,6 +502,65 @@ class OptimizationAgent:
         result["job_id"] = job_id
         result["job_pending"] = True
         return result
+
+    def _analysis_needs_baseline(
+        self,
+        description: str,
+        conversation_context: Dict,
+        allow_data_rich: bool,
+    ) -> Optional[Dict[str, Any]]:
+        """A what-if / sensitivity / resolve / pareto request needs a solved
+        baseline to analyse. When it arrives as the first message there is no
+        baseline, and the solver pipeline dead-ends with a cryptic error.
+
+        Returns a conversational guide dict in that case, else ``None`` (let
+        the normal pipeline run).
+
+        ``allow_data_rich=False`` (early gate): only short-circuit the obvious
+        *bare* case — if the text carries enough numbers/length to plausibly be
+        a full problem stated as a what-if, let the solver try it.
+        ``allow_data_rich=True`` (post-failure net): the pipeline already
+        failed, so return the guide regardless of how data-rich it looked.
+        """
+        if conversation_context.get("last_solution") or conversation_context.get(
+            "last_infeasibility"
+        ):
+            return None
+
+        analysis_type = detect_analysis_type(description)  # keyword-only, no LLM
+        if analysis_type == "unknown":
+            return None
+
+        if not allow_data_rich:
+            # A real problem stated as a what-if is number-heavy (capacities,
+            # demands, a cost matrix). Bare exploratory asks are not.
+            num_count = sum(1 for tok in description.split() if any(c.isdigit() for c in tok))
+            if num_count >= 4 or len(description.split()) > 40:
+                return None  # data-rich enough — let the solver attempt it
+
+        nice = {
+            "what_if": "what-if",
+            "sensitivity": "sensitivity",
+            "resolve": "re-solve",
+            "pareto": "trade-off (Pareto)",
+        }.get(analysis_type, analysis_type)
+        return {
+            "success": True,
+            "type": "analysis_no_baseline",
+            "analysis_type": analysis_type,
+            "response": (
+                f"That's a {nice} question — it explores how a solution changes, "
+                "so it needs a solved problem to build on, and we don't have one "
+                "yet in this conversation.\n\n"
+                "Describe the base problem first and I'll solve it, then you can "
+                "ask this directly as a follow-up. For example:\n"
+                "  “Ship from 2 plants (capacity 100, 80) to 3 customers "
+                "(demand 50, 60, 40) with unit costs [[4,6,8],[5,3,7]]; minimize "
+                "cost.”\n\n"
+                "Or paste the full scenario in one message — the baseline plus "
+                "your change — and I'll solve and compare in one go."
+            ),
+        }
 
     def _handle_follow_up(self, message: str, conversation_context: Dict, update_progress) -> Dict[str, Any]:
         """

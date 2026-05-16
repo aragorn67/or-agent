@@ -91,6 +91,7 @@ extraction fails loudly instead of producing a confident wrong answer.</p>
 <li>Deterministic numeric output (same answer every run, any machine)</li>
 <li>Runs fully local &amp; private (Ollama / qwen3:14b) &mdash; no data leaves the box</li>
 <li>Round-trip eval harness: 3/3 pass, recall 1.0</li>
+<li>Classifier choice validated against ML, RAG &amp; taxonomy baselines &mdash; three approaches built and benchmarked, simplest won on evidence (&sect;7)</li>
 </ul>
 </td>
 <td>
@@ -200,6 +201,95 @@ scenario is treated as a useful answer ("that can't work, here's why, here's how
 to fix it"), not an error &mdash; and it works even while a heuristic job is still
 pending.</p>
 
+<h2>6. The 3-layer feasibility gate</h2>
+<p>Between extraction and the solver sits a deliberately ordered gate:
+<strong>cheapest, most certain checks first; the expensive solver call last
+and only if needed</strong>. Each layer can reject with plain-language reasons
+<em>and concrete repair suggestions</em>; the rejected instance is remembered
+so the next message can fix it.</p>
+<table>
+<tr><th>Layer</th><th>What it does</th><th>Cost</th><th>Example catch</th></tr>
+<tr>
+<td><strong>0 &mdash; Structural / sanity</strong><br>(problem-agnostic, pure Python)</td>
+<td>Empty index sets, None/empty keys, dimensional consistency (cost matrix =
+sources &times; sinks), finite &amp; non-negative values</td>
+<td>microseconds</td>
+<td><code>capacity = &minus;50</code>; cost matrix of the wrong shape</td>
+</tr>
+<tr>
+<td><strong>1 &mdash; Problem-specific necessary conditions</strong><br>(domain knowledge)</td>
+<td>e.g. transportation: total supply &ge; total demand (with FP tolerance),
+capacity vs. demand &mdash; necessary, not sufficient</td>
+<td>microseconds</td>
+<td>total demand 900 &gt; total supply 700 &rarr; reports the 200 shortfall</td>
+</tr>
+<tr>
+<td><strong>2 &mdash; Solver-based</strong><br>(LP relaxation, the backstop)</td>
+<td>Builds the real Pyomo model, relaxes binary/integer &rarr; continuous,
+swaps in a dummy 0 objective, solves <em>only for feasibility</em></td>
+<td>one LP solve</td>
+<td>interaction / per-arc-capacity patterns Layers&nbsp;0&ndash;1 cannot see</td>
+</tr>
+</table>
+<p>Layer&nbsp;2 returns FEASIBLE / INFEASIBLE / UNKNOWN; if inconclusive it
+defers to "feasible because Layers&nbsp;0+1 passed." The report carries
+<code>status</code>, <code>reasons</code>, <code>layer_passed</code> (a
+debugging aid) and actionable <code>suggestions</code>.</p>
+<p><strong>Why this matters.</strong> This is the guardrail against LLM
+hallucination. If the extractor invents or mis-reads a parameter, the
+structured checks catch the inconsistency <em>before</em> the solver runs
+&mdash; so the system fails loudly with a fixable explanation instead of
+producing a confident wrong number. Fail fast, fail cheap, fail actionable.</p>
+
+<h2>7. Classification &mdash; three approaches evaluated</h2>
+<p>Production uses an <strong>LLM 3-vote majority</strong> classifier. It was
+not the first or only thing tried: two alternatives were fully built and
+benchmarked first, and a third was engineered as a deterministic fallback.</p>
+<table>
+<tr><th>Approach</th><th>Accuracy on real OR problems</th><th>Speed</th><th>Status</th></tr>
+<tr><td>LLM, 3-vote majority</td><td><strong>70%</strong></td><td>3&ndash;5&nbsp;s</td><td><strong>shipped</strong></td></tr>
+<tr><td>Random-Forest + TF-IDF</td><td>44% (95% train / ~75% held-out)</td><td>&lt;1&nbsp;ms</td><td>rejected</td></tr>
+<tr><td>LLM + RAG retrieval</td><td>50%</td><td>~35&nbsp;s, timeouts</td><td>rejected</td></tr>
+<tr><td>Taxonomy + weak-supervision hybrid</td><td>built (deterministic, auditable)</td><td>&lt;1&nbsp;ms</td><td>dormant fallback</td></tr>
+</table>
+<ul>
+<li><strong>ML classifier:</strong> Random Forest over a curated
+<strong>523-instance</strong> dataset (OR-Library benchmarks +
+Chain-of-Experts/LPWP + synthetic; 24 subtypes, 11 families). It memorised
+the training distribution (95% train) but generalised poorly to real
+OR-Library problems (44% vs the LLM's 70%). Ensemble (LLM+ML) and two-stage
+(ML suggests &rarr; LLM verifies) <em>also</em> failed to beat the LLM alone
+&mdash; the errors were correlated, not complementary.</li>
+<li><strong>RAG:</strong> LangChain + Chroma over 8 OR textbooks/papers
+(<strong>20,399 chunks, 5,008 pages</strong>, <code>all-MiniLM-L6-v2</code>
+embeddings). It made classification <em>worse</em> (50% vs 70%) and caused
+extraction timeouts (2/10 problems &gt;60&nbsp;s): generic textbook
+definitions conflicted with the specific problem and added noise, not signal.
+RAG helped factual recall, not structural classification.</li>
+<li><strong>Taxonomy + weak supervision</strong> (<code>or_classify/</code>):
+a versioned, hierarchical <strong>9-family OR taxonomy</strong> &mdash; each
+family carrying definitions, subtypes, examples and explicit
+<em>near-misses</em> &mdash; with <strong>7 Snorkel-style labeling
+functions</strong> and a hybrid feature pipeline (TF-IDF + LF votes +
+engineered features). Designed as a deterministic, auditable, schema-grounded
+alternative; built and retained as a fallback, not in the production path.</li>
+<li><strong>Takeaway:</strong> the simplest option &mdash; an LLM 3-vote
+majority &mdash; was both the most accurate and the cheapest to operate. The
+elaborate approaches are preserved as evidence and a deterministic fallback.
+A documented "simple baseline is hard to beat" outcome.</li>
+</ul>
+
+<h2>8. Warm-start &mdash; an honest negative result</h2>
+<p>The plan assumed a heuristic warm-start would accelerate every solve. It
+does not. Warm-start helps only small pure-LP transport; beyond ~10&times;20 it
+is <em>slower</em> than a cold solve, and on scheduling the cold and warm runs
+finish within milliseconds of each other &mdash; because the bottleneck is the
+MIP optimality-proof gap, not finding a feasible point. Consequence:
+warm-start is now <strong>gated to the fixed-charge MIP</strong> and off
+elsewhere. Separately, HiGHS was chosen over GLPK by a gate experiment (cold
+solve 79&nbsp;ms on the reference instance, honours <code>time_limit</code> /
+<code>mip_rel_gap</code>, installs as a wheel &mdash; no external binary).</p>
+
 <h2>Assumptions &amp; scope</h2>
 <p>Being explicit about what the current system assumes:</p>
 <ul>
@@ -237,7 +327,7 @@ flow, richer scheduling, beyond the current two.</li>
 persistent/scalable job store, auth, rate limiting.</li>
 </ul>
 
-<p class="foot">Optimization-AI &mdash; internal overview for Tolaros. Figures
+<p class="foot">Optimization-AI &mdash; system overview. Figures
 verified by direct solver run on 2026-05-16; numeric results are reproducible on
 any machine (see the Windows run guide). Part&nbsp;II reflects the codebase as of
 that date.</p>
