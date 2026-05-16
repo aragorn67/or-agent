@@ -168,33 +168,24 @@ def format_scenario_results(results: Dict[str, Any]) -> str:
         mod = modifications[0]
         output.append(f"Scenario: {mod.get('type')} {mod.get('parameter')} of '{mod.get('entity')}' by/to {mod.get('value')}\n")
 
-    # Handle infeasible scenarios
+    # Handle infeasible scenarios. This is a valid, useful answer ("that
+    # change can't work, here's why") — keep it plain-language: no internal
+    # "failed at layer N" jargon, which means nothing to a non-OR reader.
     if not results.get('success') or not results.get('feasible', True):
-        output.append(f"✗ Scenario is INFEASIBLE\n")
-
-        # Show layer and reasons
-        layer_failed = results.get('layer_failed')
-        if layer_failed is not None:
-            layer_names = {
-                0: "Layer 1 (Structural Validation)",
-                1: "Layer 2 (Problem-Specific Conditions)",
-                2: "Layer 3 (LP Relaxation)"
-            }
-            output.append(f"Failed at: {layer_names.get(layer_failed, f'Layer {layer_failed}')}")
+        output.append("❌ That scenario can't work — there's no valid plan for it.\n")
 
         reasons = results.get('reasons', [])
         if reasons:
-            output.append("\nReasons:")
+            output.append("Why:")
             for reason in reasons:
                 output.append(f"  • {reason}")
 
         suggestions = results.get('suggestions', [])
         if suggestions:
-            output.append("\n💡 Suggestions to make scenario feasible:")
+            output.append("\n💡 To make it work, you could:")
             for suggestion in suggestions[:3]:  # Show top 3
                 output.append(f"  • {suggestion}")
 
-        output.append(f"\n{results.get('message', 'Cannot solve this scenario')}")
         return "\n".join(output)
 
     # Cost comparison

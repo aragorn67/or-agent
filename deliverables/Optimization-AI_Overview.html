@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Optimization-AI — Overview</title>
+<style>
+  @page { size: A4; margin: 20mm; }
+  body { font-family: "Liberation Sans", Arial, sans-serif; color:#1b1f2a;
+         font-size: 11pt; line-height: 1.5; }
+  h1 { font-size: 22pt; margin: 0 0 2pt 0; color:#2b2f6b; }
+  .sub { color:#5b6072; font-size: 11pt; margin: 0 0 16pt 0; }
+  h2 { font-size: 14pt; color:#2b2f6b; border-bottom: 1.5pt solid #d6d9e6;
+       padding-bottom: 3pt; margin: 20pt 0 8pt 0; }
+  h3 { font-size: 11.5pt; margin: 12pt 0 4pt 0; }
+  code, .mono { font-family: "Liberation Mono", "Courier New", monospace;
+                font-size: 9.5pt; background:#f1f2f7; padding:1pt 4pt; border-radius:3pt; }
+  pre { background:#f1f2f7; padding:8pt 10pt; border-radius:5pt; font-size:9pt;
+        font-family:"Liberation Mono","Courier New",monospace; white-space:pre; }
+  table { border-collapse: collapse; width:100%; margin:8pt 0; font-size:10pt; }
+  th, td { border:1pt solid #d6d9e6; padding:5pt 8pt; text-align:left; vertical-align:top; }
+  th { background:#eef0f8; }
+  .quote { border-left: 3pt solid #8a8fc7; padding:4pt 12pt; color:#3a3f57;
+           font-style: italic; background:#f7f8fc; margin:8pt 0; }
+  .tag { display:inline-block; background:#2b2f6b; color:#fff; font-size:8.5pt;
+         padding:1pt 7pt; border-radius:8pt; margin-right:4pt; }
+  ul { margin:4pt 0 4pt 0; padding-left:18pt; }
+  li { margin:2pt 0; }
+  .foot { margin-top:18pt; color:#8c91a3; font-size:8.5pt; border-top:1pt solid #d6d9e6; padding-top:6pt; }
+</style>
+</head>
+<body>
+
+<h1>Optimization-AI</h1>
+<p class="sub">Plain-English in &rarr; provably-optimal decision out. An LLM front-end over a real operations-research solver.</p>
+
+<h2>What it is, in one sentence</h2>
+<p>You describe a logistics or planning problem in ordinary language; the system
+figures out <em>what kind</em> of optimization problem it is, pulls the numbers
+out of the prose, runs an exact mathematical solver, and explains the answer
+back in plain English &mdash; with no spreadsheet, no modelling language, and no
+solver expertise required from the user.</p>
+
+<h2>Why this is worth something</h2>
+<p>Operations Research already <em>solves</em> these problems optimally &mdash; the
+hard part has always been the human bottleneck in between: someone has to
+translate a messy business question into a precise mathematical model. That step
+needs a specialist and takes hours. This system collapses that step to a
+sentence, while keeping the answer <strong>exact</strong> (it is a real solver,
+not the LLM guessing numbers).</p>
+
+<h2>What it can do today &mdash; two live examples</h2>
+
+<h3><span class="tag">Example 1</span> Classic transportation (linear program)</h3>
+<p class="quote">"Two factories produce widgets: Seattle has capacity 350 and San
+Diego has capacity 600. Ship to New York (325), Chicago (300), Topeka (275).
+Distances in thousand miles &hellip; freight is $90 per case per thousand miles.
+Minimize total shipping cost."</p>
+<p><strong>Result:</strong> optimal shipping plan, total cost
+<strong>$153,675</strong> &mdash; matches the textbook optimum exactly.</p>
+
+<h3><span class="tag">Example 2</span> Fixed-charge logistics (mixed-integer program)</h3>
+<p class="quote">"Ship from 2 plants to 3 customers&hellip; on top of per-unit cost,
+<em>opening any route costs a fixed $500</em> regardless of volume. Minimize
+total cost including the fixed charges."</p>
+<p><strong>Result:</strong> optimal cost <strong>1660</strong> &mdash; the solver
+decides it is cheaper to consolidate onto <strong>three</strong> routes
+(P1&rarr;M1, P1&rarr;M2, P2&rarr;M3) and leave the rest closed. This is a genuinely
+hard combinatorial decision (which routes to open), not just arithmetic.</p>
+
+<h2>How it works</h2>
+<p>Every stage is a discrete, inspectable step &mdash; not one opaque prompt:</p>
+<pre>natural language
+   -> Intent router      (new problem / follow-up / chit-chat)
+   -> Classifier         (transportation? scheduling? — majority vote, schema-bound)
+   -> Specialist extractor (prose -> typed parameter table)
+   -> Feasibility check  (3 layers: structural -> domain rules -> LP relaxation)
+   -> Solver             (Pyomo + HiGHS — exact LP / MIP)
+   -> Explanation        (plain-language summary, numbers grounded in the solution)</pre>
+<p>The feasibility gate matters: if the LLM hallucinates a number, the structured
+checks catch the inconsistency <em>before</em> the solver runs, so a bad
+extraction fails loudly instead of producing a confident wrong answer.</p>
+
+<h2>What is solid vs. honest limitations</h2>
+<table>
+<tr><th>Solid today</th><th>Honest limitations</th></tr>
+<tr>
+<td>
+<ul>
+<li>Transportation (LP) &amp; fixed-charge (MIP) &mdash; exact, verified against textbook optima</li>
+<li>Single-stage scheduling</li>
+<li>Deterministic numeric output (same answer every run, any machine)</li>
+<li>Runs fully local &amp; private (Ollama / qwen3:14b) &mdash; no data leaves the box</li>
+<li>Round-trip eval harness: 3/3 pass, recall 1.0</li>
+</ul>
+</td>
+<td>
+<ul>
+<li>First answer is slow on CPU (~2&ndash;3 min of local LLM inference) &mdash; the
+next roadmap item makes the wait visible/streamed</li>
+<li>Two problem families so far; more to add</li>
+<li>Heuristic warm-start helps LP, not yet fixed-charge-aware</li>
+<li>Explanation wording varies slightly run-to-run (the <em>numbers</em> do not)</li>
+</ul>
+</td>
+</tr>
+</table>
+
+<p style="color:#5b6072;font-size:10pt;margin-top:14pt;">The high-level picture
+ends here. The rest of this document is for anyone who wants to dive into
+<em>how</em> it actually works, the modelling assumptions, and what is next.</p>
+
+<h1 style="page-break-before:always;margin-top:0;">Part II &mdash; Technical deep dive</h1>
+<p class="sub">For the reader who wants the internals.</p>
+
+<h2>1. How a request is orchestrated</h2>
+<p>A single entry point (<code>agent/core.py &rarr; solve_natural_language</code>)
+runs a fixed, inspectable pipeline. Every stage is a discrete step with its own
+module, not one opaque megaprompt:</p>
+<ol>
+<li><strong>Intent router</strong> &mdash; classifies the message as
+<em>smalltalk / help / follow-up / optimization</em>. The first three
+short-circuit; only a genuine problem enters the solve pipeline.</li>
+<li><strong>Problem classifier</strong> &mdash; picks the problem family and the
+concrete <code>solver_id</code> using an <em>N-vote majority</em> over a
+JSON-schema-bound prompt. Low confidence or "UNKNOWN" stops here with a clear
+message rather than guessing.</li>
+<li><strong>Specialist extractor</strong> &mdash; a per-family extractor
+(<code>TransportationSpecialist</code> / <code>SchedulingSpecialist</code>)
+turns prose into a typed parameter dict, mirroring an example schema and
+omitting optional fields (e.g. <code>fixed_cost</code>) when not mentioned.</li>
+<li><strong>Validation + 3-layer feasibility</strong> &mdash; structural checks,
+then problem-specific necessary conditions (e.g. total supply &ge; total
+demand), then an LP-relaxation solve. An infeasible instance returns
+plain-language reasons <em>and concrete repair suggestions</em>, and is
+remembered so the next message can fix it.</li>
+<li><strong>Mode routing</strong> &mdash; <code>exact</code>,
+<code>heuristic</code>, or <code>heuristic_then_ask</code> (see &sect;2).</li>
+<li><strong>Solve &rarr; explain</strong> &mdash; Pyomo + HiGHS produces the
+numbers; the LLM narrates them. The solution is stored in the conversation
+context so follow-ups and what-ifs work against it.</li>
+</ol>
+
+<h2>2. The two-call heuristic protocol</h2>
+<p>Local LLM inference costs ~2&ndash;3 min on CPU. Rather than make the user
+stare at a spinner, <code>heuristic_then_ask</code> mode splits the work:</p>
+<ul>
+<li><strong>Call&nbsp;1:</strong> a fast constructive heuristic (Vogel's
+Approximation for transport, Longest-Processing-Time for scheduling) returns a
+feasible answer immediately, together with an <em>LP-relaxation lower bound</em>
+&rarr; an honest "this is at most X% above optimal" gap. The job is persisted in
+an in-memory store (10-minute TTL).</li>
+<li><strong>The user decides:</strong> <code>optimize</code> /
+<code>accept</code> / <code>use heuristic</code> &mdash; or just asks a free-text
+what-if, which is answered against the pending job without consuming it.</li>
+<li><strong>Call&nbsp;2 (optimize):</strong> the exact solver runs
+<em>warm-started</em> from the heuristic's solution (Pyomo
+<code>var.value=&hellip;</code> before solve; APPSI-HiGHS picks it up
+automatically) &rarr; a provably-optimal answer, reached faster.</li>
+</ul>
+
+<h2>3. How the optimization is actually solved</h2>
+<p>Models are built with <strong>Pyomo</strong> and solved by <strong>HiGHS</strong>
+through its <code>highspy</code> wheel via Pyomo's APPSI interface &mdash; no
+external solver binary to install (this is also why Windows setup is now
+trivial).</p>
+<h3>Transportation &mdash; linear program</h3>
+<pre>min   &Sigma;_ij  c_ij &middot; x_ij
+s.t.  &Sigma;_j x_ij &le; capacity_i        (supply)
+      &Sigma;_i x_ij &ge; demand_j          (demand)
+      x_ij &ge; 0     (optional per-arc capacity x_ij &le; u_ij)</pre>
+<h3>Fixed-charge logistics &mdash; mixed-integer program</h3>
+<pre>min   &Sigma;_ij c_ij &middot; x_ij  +  &Sigma;_ij f_ij &middot; y_ij
+s.t.  transportation constraints, plus
+      x_ij &le; M_ij &middot; y_ij ,   y_ij &isin; {0,1}
+      M_ij = min(capacity_i, demand_j)   (tight big-M)</pre>
+<p>The binary <code>y_ij</code> = "is route (i,j) open?" turns this into a real
+combinatorial decision. Supplying a <code>fixed_cost</code> automatically
+switches the model to a MIP, enables the LP-relaxation bound, and trips the
+warm-start gate. Single-stage scheduling is modelled analogously (assignment +
+sequencing, makespan objective; LPT heuristic for the warm answer).</p>
+<p><strong>Determinism:</strong> HiGHS returns the exact optimum and
+classification/extraction run at temperature&nbsp;0, so the objective and flows
+are byte-identical on any machine; only the narration wording can vary.</p>
+
+<h2>4. The LLM layer</h2>
+<p>An abstract <code>LLMClient</code> hides the provider. The default is local
+Ollama with <code>qwen3:14b</code> across all stages (one warm model); a Groq
+backend is opt-in. Per-stage temperature: classification&nbsp;0 (schema-bound,
+voted), extraction&nbsp;0, explanation&nbsp;0.1&ndash;0.3 (wording only).</p>
+<p>The key design rule: <strong>the LLM never computes the optimum.</strong> It
+only translates prose&harr;schema and narrates the solver's output. The 3-layer
+feasibility gate is the guardrail &mdash; a hallucinated parameter fails loudly
+<em>before</em> the solver runs, instead of producing a confident wrong number.</p>
+
+<h2>5. Follow-ups &amp; what-if</h2>
+<p>Follow-ups are classified into <em>sensitivity / what-if / resolve / pareto</em>.
+A what-if re-parses just the changed parameter, re-checks feasibility, re-solves,
+and reports the cost delta and flow changes against the baseline. An infeasible
+scenario is treated as a useful answer ("that can't work, here's why, here's how
+to fix it"), not an error &mdash; and it works even while a heuristic job is still
+pending.</p>
+
+<h2>Assumptions &amp; scope</h2>
+<p>Being explicit about what the current system assumes:</p>
+<ul>
+<li>The LLM extracts and explains; <strong>all arithmetic is the solver's</strong>.</li>
+<li>Transportation is single-commodity, single-period; costs are linear in flow;
+capacities, demands and costs are point estimates (no uncertainty/stochastics).</li>
+<li>A fixed charge, when present, is incurred once per opened route regardless of
+volume; <code>M_ij = min(capacity_i, demand_j)</code> is taken as a valid tight bound.</li>
+<li>The fast feasibility checks assume standard supply/demand structure; the
+LP-relaxation layer is the backstop for anything they miss.</li>
+<li>Scheduling is single-stage.</li>
+<li>Reproducibility assumes the same model (<code>qwen3:14b</code>) and solver
+(HiGHS); explanation prose may differ run to run.</li>
+<li>Single-process, in-memory job store with a 10-minute TTL &mdash; not yet
+horizontally scaled.</li>
+<li>Demo posture: trusted input, no authentication / rate-limiting / multi-tenancy.</li>
+</ul>
+
+<h2>Future work</h2>
+<ul>
+<li><strong>Make the wait visible</strong> &mdash; stream the classify/extract/solve
+pipeline live so the LLM latency reads as progress, not dead air.</li>
+<li><strong>Follow-up chips &amp; graceful fallback</strong> &mdash; one-click
+what-if / sensitivity on the last solution.</li>
+<li><strong>Spreadsheet / API fast path</strong> &mdash; upload an Excel sheet (or
+post structured params) and skip both LLM calls entirely; Excel export of results.</li>
+<li><strong>Fixed-charge-aware heuristic</strong> &mdash; the reported heuristic
+cost is now correct, but the warm start (VAM) is still fixed-charge-blind; a
+charge-aware constructive heuristic would tighten the gap.</li>
+<li><strong>More problem families</strong> &mdash; multi-period / multi-commodity
+flow, richer scheduling, beyond the current two.</li>
+<li><strong>Evaluation depth</strong> &mdash; extend the round-trip eval harness
+(Phase&nbsp;3) and add adversarial extraction tests.</li>
+<li><strong>Productionization</strong> (if it graduates from demo) &mdash;
+persistent/scalable job store, auth, rate limiting.</li>
+</ul>
+
+<p class="foot">Optimization-AI &mdash; internal overview for Tolaros. Figures
+verified by direct solver run on 2026-05-16; numeric results are reproducible on
+any machine (see the Windows run guide). Part&nbsp;II reflects the codebase as of
+that date.</p>
+
+</body>
+</html>

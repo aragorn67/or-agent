@@ -35,6 +35,38 @@ def test_heuristic_mode_supported():
     assert not heuristic_mode_supported("UNKNOWN")
 
 
+def test_fixed_charge_heuristic_cost_includes_fixed_charges(store):
+    """Regression: VAM is fixed-charge-blind, but the *reported* heuristic
+    cost must include the fixed charge on every opened route. Otherwise the
+    cost is understated (variable-only) and gap-vs-bound goes negative."""
+    params = {
+        "plants": ["P1", "P2"],
+        "markets": ["M1", "M2", "M3"],
+        "capacity": {"P1": 100, "P2": 100},
+        "demand": {"M1": 40, "M2": 40, "M3": 40},
+        "cost": {"P1": {"M1": 1, "M2": 2, "M3": 3},
+                 "P2": {"M1": 3, "M2": 2, "M3": 1}},
+        "fixed_cost": {"P1": {"M1": 500, "M2": 500, "M3": 500},
+                       "P2": {"M1": 500, "M2": 500, "M3": 500}},
+    }
+    result = run_heuristic_for_transport(
+        params=params,
+        description="fixed-charge",
+        problem_type="TRANSPORTATION",
+        solver_id="transport_basic_bipartite",
+        classification={"confidence": 1.0, "type": "TRANSPORTATION"},
+        job_store=store,
+        ask_to_continue=True,
+    )
+    sol = result["solution"]
+    # Variable-only cost would be 160; true cost opens 3 routes -> +3*500.
+    assert sol["objective_value"] == pytest.approx(1660.0)
+    # Bound can never exceed the (correct) heuristic cost -> gap >= 0.
+    assert sol["gap"] is not None and sol["gap"] >= -1e-9
+    # Job persists the corrected cost for the warm-start / accept path.
+    assert store.get(result["job_id"]).heuristic_cost == pytest.approx(1660.0)
+
+
 def test_heuristic_handler_returns_job_id_and_bound(seattle_params, store):
     result = run_heuristic_for_transport(
         params=seattle_params,

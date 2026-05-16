@@ -240,3 +240,75 @@ greedy primal solution by hand. Solved twice: cold (no warm-start) and warm
 — no need to drop to raw `highspy`. Warm-start uses the natural Pyomo
 pattern: set `var.value = ...` before `solver.solve(model)`, APPSI picks it up
 automatically.
+
+---
+
+## 2026-05-16 — Roadmap #8: what-if follow-ups on a pending job
+
+**Problem.** In the chat demo, asking "what if P2 capacity drops to 50?" while
+a heuristic_then_ask job was pending returned the dead-end "I didn't catch
+what you'd like to do" message. The capability to re-solve under a what-if
+appeared missing.
+
+**Root cause — three layered defects, found by an offline repro:**
+1. **UI/API funnel.** While a job is pending, `chat.html` sends *every*
+   message to `/chat/continue`, which only ran `parse_continue_action`
+   (optimize/accept/use_heuristic). Anything else dead-ended; the agent's
+   follow-up machinery was never reached.
+2. **Latent analysis-path bug.** `_handle_follow_up_analysis` built the solver
+   via `get_solver(problem_type.lower())` → `get_solver("transportation")`,
+   but the registry keys on solver_id. Every analysis follow-up would have
+   raised `Unsupported solver_id: 'transportation'` — the path was simply
+   never exercised before.
+3. **Mis-routing.** `_handle_follow_up` sent "modification" follow-ups to
+   canned text, and the lightweight keyword classifier labels "what if X…"
+   as a plain *question* (starts with "what"), so it fell through to a
+   generic reply instead of the (working) what-if engine.
+
+**Fixes.**
+- `follow_up_on_job(job_id, message)` (agent/core.py): synthesises a baseline
+  by exactly solving the job's params, routes through `_handle_follow_up`,
+  and **does not consume the job** (user can still optimize/accept).
+- `/chat/continue`: non-action message → `follow_up_on_job` instead of the
+  dead-end. `chat.html`: render the follow-up answer and keep `jobId` set
+  when `job_pending` is returned.
+- `_handle_follow_up_analysis`: resolve solver from
+  `solution["solver_id"]` (fallback: category default), never the category.
+- `_handle_follow_up`: modification/analysis and any LLM-detected
+  what-if/sensitivity/resolve/pareto intent → `_handle_follow_up_analysis`.
+
+**Verification.**
+- Offline repro with the real qwen3:14b: "what if P2 capacity drops to 50?"
+  on the fixed-charge example now returns FEASIBLE/OPTIMAL. Answer is
+  *correctly* unchanged (1660): P2 only ships 40 to M3, so a cap of 50 is
+  not binding — the engine genuinely re-solved, it did not echo.
+- 5 deterministic regression tests (`tests/test_followup_whatif.py`), LLM
+  stubbed. Full suite: 139 passed; the 2 fails / 3 errors are pre-existing
+  and unrelated (Groq 429 rate-limit, stale config-default test, ML import
+  collection errors).
+
+**Follow-up (same day).** Infeasible what-ifs ("what if P1 capacity drops to
+5?") were surfacing as a cryptic error: `_handle_follow_up_analysis` treated
+any `success=False` result as an `analysis_error` and returned the internal
+`"Scenario is infeasible (failed at layer 1)"` string, discarding the
+feasibility engine's plain-language reasons/suggestions. Fixed: a structured
+`feasible=False` result is now a valid `follow_up_analysis` answer (formatted,
+success=True, job stays pending); `format_scenario_results` rewritten to drop
+all "Layer N" jargon for the non-OR audience. +1 regression test (6 total in
+test_followup_whatif.py).
+
+**Follow-up (same day) — perf + fixed-charge gap.**
+(1) Perf: a "what if" follow-up was making 3 sequential qwen3:14b calls
+(detect_analysis_type in the routing gate + again inside the handler + the
+what-if parse). The routing gate now uses keyword-only detection (no LLM)
+and passes the type down so the handler skips re-detecting → 3 LLM calls
+→ 1 (only the unavoidable modification parse).
+(2) Fixed-charge gap bug: `run_heuristic_for_transport` reported
+`vam.cost` (variable cost only) for fixed-charge problems while the LP
+bound included fixed costs, so the heuristic cost was understated (160 vs
+true 1660) and gap-vs-bound went to ~-937% (surfaced to the user as a
+"9-10%" gap). Fix: new `_fixed_charge_total()` adds the fixed charge for
+every opened route to the reported/stored heuristic cost. The fixed-charge
+demo now reports cost 1660, gap 0.0 ("provably optimal"), consistent
+through the optimize/accept paths. +1 regression test in
+test_heuristic_two_call.py (10 there; full follow-up/heuristic suites green).

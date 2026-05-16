@@ -80,16 +80,10 @@ def chat_continue(req: ChatContinueRequest):
     """Free-text alternative to /continue. Parses the message into an action."""
     action = parse_continue_action(req.message)
     if action is None:
-        return {
-            "success": False,
-            "error": (
-                "I didn't catch what you'd like to do. Try one of: "
-                "'optimize' / 'make it better' to run the exact solver, "
-                "'accept' / 'good enough' to keep this answer, or "
-                "'use heuristic' to stick with the heuristic."
-            ),
-            "available_actions": ["optimize", "accept", "use_heuristic"],
-        }
+        # Not an optimize/accept/use_heuristic action. Treat it as a free-text
+        # follow-up / what-if against the still-pending job instead of
+        # dead-ending. The job stays alive so the user can still decide.
+        return agent.follow_up_on_job(req.job_id, req.message)
     result = agent.continue_job(req.job_id, action)
     result["parsed_action"] = action
     return result

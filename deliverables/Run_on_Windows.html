@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Optimization-AI — Run on Windows</title>
+<style>
+  @page { size: A4; margin: 18mm; }
+  body { font-family:"Liberation Sans",Arial,sans-serif; color:#1b1f2a; font-size:10.5pt; line-height:1.45; }
+  h1 { font-size:21pt; color:#2b2f6b; margin:0 0 2pt 0; }
+  .sub { color:#5b6072; margin:0 0 14pt 0; }
+  h2 { font-size:13pt; color:#2b2f6b; border-bottom:1.5pt solid #d6d9e6; padding-bottom:3pt; margin:16pt 0 6pt 0; }
+  pre { background:#11151f; color:#e6e8f0; padding:8pt 10pt; border-radius:5pt;
+        font-size:9pt; font-family:"Liberation Mono","Courier New",monospace; white-space:pre-wrap; }
+  code { font-family:"Liberation Mono","Courier New",monospace; background:#f1f2f7; padding:1pt 4pt; border-radius:3pt; font-size:9.5pt; }
+  table { border-collapse:collapse; width:100%; margin:8pt 0; font-size:10pt; }
+  th,td { border:1pt solid #d6d9e6; padding:5pt 8pt; text-align:left; }
+  th { background:#eef0f8; }
+  .warn { background:#fff6e6; border-left:3pt solid #d9a233; padding:6pt 12pt; margin:8pt 0; font-size:10pt; }
+  .ok { background:#ecf7ee; border-left:3pt solid #3f9d52; padding:6pt 12pt; margin:8pt 0; font-size:10pt; }
+  ol { padding-left:18pt; } li { margin:3pt 0; }
+  .foot { margin-top:16pt; color:#8c91a3; font-size:8.5pt; border-top:1pt solid #d6d9e6; padding-top:6pt; }
+</style>
+</head>
+<body>
+
+<h1>Run Optimization-AI on Windows</h1>
+<p class="sub">Step-by-step setup that reproduces the exact same results as the development machine.</p>
+
+<h2>Prerequisites</h2>
+<table>
+<tr><th>Requirement</th><th>Notes</th></tr>
+<tr><td>Windows 10 / 11 (64-bit)</td><td>&nbsp;</td></tr>
+<tr><td>Python 3.10&ndash;3.12</td><td>From <code>python.org</code> &mdash; tick <strong>"Add Python to PATH"</strong> during install.</td></tr>
+<tr><td>Ollama for Windows</td><td>From <code>https://ollama.com/download</code>. Runs the local LLM.</td></tr>
+<tr><td>~15 GB free disk</td><td>The <code>qwen3:14b</code> model is ~9.3 GB.</td></tr>
+<tr><td>~16 GB RAM recommended</td><td>Model runs in RAM on CPU; a GPU is optional but much faster.</td></tr>
+</table>
+
+<div class="ok"><strong>Good news vs. the old instructions:</strong> you do
+<strong>not</strong> need to install GLPK or fiddle with PATH for a solver. The
+project now uses HiGHS, which installs automatically as a Python wheel
+(<code>highspy</code>) via <code>pip</code>. Ignore the GLPK / <code>qwen2:7b</code>
+steps in the old <code>setup.bat</code> &mdash; this guide supersedes them.</div>
+
+<h2>Setup (one time)</h2>
+<ol>
+<li><strong>Install Ollama</strong>, then in a terminal pull the model:
+<pre>ollama pull qwen3:14b</pre>
+Leave Ollama running (it auto-starts as a background service on Windows).</li>
+
+<li><strong>Get the project</strong> and open a Command Prompt in its folder
+(the folder containing <code>api.py</code>).</li>
+
+<li><strong>Create the virtual environment and install dependencies:</strong>
+<pre>python -m venv Tolis_Env
+Tolis_Env\Scripts\activate.bat
+python -m pip install --upgrade pip
+pip install -r requirements.txt</pre>
+The install takes a few minutes (it includes HiGHS, Pyomo, FastAPI).</li>
+</ol>
+
+<h2>Run it</h2>
+<pre>Tolis_Env\Scripts\activate.bat
+set LLM_BACKEND=ollama
+uvicorn api:app --host 127.0.0.1 --port 8000</pre>
+<p>Then open <code>http://localhost:8000</code> in a browser. Click one of the
+two built-in examples and press solve.</p>
+
+<div class="warn"><strong>First answer is slow.</strong> The first query loads
+<code>qwen3:14b</code> into memory and runs ~2&ndash;3 minutes of local inference on
+CPU (faster with a GPU). This is normal &mdash; it is the LLM thinking, not a hang.
+Subsequent queries are quicker because the model stays warm. To pre-warm before
+a demo, run any prompt once and wait for it to finish.</div>
+
+<h2>Verifying you get the same results</h2>
+<p>The numeric output is <strong>fully deterministic and machine-independent</strong>.
+The classifier and parameter extractor run at temperature&nbsp;0, and the solver
+(HiGHS) returns the exact mathematical optimum. So the two built-in examples must
+produce <em>exactly</em> these answers on your Windows machine:</p>
+<table>
+<tr><th>Built-in example</th><th>Expected result (must match exactly)</th></tr>
+<tr><td>Transportation (Seattle / San Diego)</td><td>Status <code>OPTIMAL</code>, total cost <strong>$153,675</strong></td></tr>
+<tr><td>Fixed-charge (P1/P2 &rarr; M1/M2/M3)</td><td>Status <code>OPTIMAL</code>, cost <strong>1660</strong>, opens routes <strong>P1&rarr;M1, P1&rarr;M2, P2&rarr;M3</strong></td></tr>
+</table>
+<p>If the objective value and the opened routes match, the system is working
+correctly. The only thing that may differ between machines or runs is the
+<em>wording</em> of the plain-language explanation (it uses a small amount of
+creative temperature) &mdash; the numbers, flows, and routing decision do not change.</p>
+
+<h2>Quick troubleshooting</h2>
+<table>
+<tr><th>Symptom</th><th>Fix</th></tr>
+<tr><td>"Ollama not running" / connection refused</td><td>Open the Ollama app, or run <code>ollama serve</code> in a separate terminal.</td></tr>
+<tr><td>Empty / instant <code>{}</code> from the model</td><td>Confirm the model is <code>qwen3:14b</code> (<code>ollama list</code>). Do not substitute a different model.</td></tr>
+<tr><td><code>uvicorn</code> not found</td><td>The venv is not activated &mdash; run <code>Tolis_Env\Scripts\activate.bat</code> first.</td></tr>
+<tr><td>Port 8000 already in use</td><td>Use <code>--port 8765</code> and open that port instead.</td></tr>
+<tr><td>Very slow / out of memory</td><td>Close other apps; 14B model needs ~10 GB free RAM. A CUDA GPU speeds it up dramatically.</td></tr>
+</table>
+
+<p class="foot">Optimization-AI &mdash; Windows run guide. Expected values verified
+by direct solver run on 2026-05-16. <code>LLM_BACKEND=ollama</code> keeps
+everything local; no API key and no internet needed after the model is pulled.</p>
+
+</body>
+</html>

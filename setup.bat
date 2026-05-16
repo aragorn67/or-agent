@@ -6,12 +6,12 @@ echo ========================================
 echo.
 
 REM Check Python installation
-echo [1/5] Checking Python installation...
+echo [1/4] Checking Python installation...
 python --version >nul 2>&1
 if %errorlevel% neq 0 (
     echo ERROR: Python is not installed or not in PATH
     echo.
-    echo Please install Python 3.8 or higher from:
+    echo Please install Python 3.10 or higher from:
     echo https://www.python.org/downloads/
     echo.
     echo IMPORTANT: Check "Add Python to PATH" during installation!
@@ -23,7 +23,7 @@ echo Python found!
 echo.
 
 REM Create virtual environment
-echo [2/5] Creating virtual environment 'Tolis_Env'...
+echo [2/4] Creating virtual environment 'Tolis_Env'...
 if exist Tolis_Env (
     echo Virtual environment already exists. Skipping...
 ) else (
@@ -38,7 +38,7 @@ if exist Tolis_Env (
 echo.
 
 REM Activate virtual environment and install dependencies
-echo [3/5] Installing Python packages...
+echo [3/4] Installing Python packages (includes the HiGHS solver - no separate solver install needed)...
 echo This may take a few minutes...
 call Tolis_Env\Scripts\activate.bat
 if %errorlevel% neq 0 (
@@ -58,7 +58,7 @@ echo Dependencies installed!
 echo.
 
 REM Check for Ollama
-echo [4/5] Checking for Ollama...
+echo [4/4] Checking for Ollama...
 where ollama >nul 2>&1
 if %errorlevel% neq 0 (
     echo WARNING: Ollama not found!
@@ -67,34 +67,26 @@ if %errorlevel% neq 0 (
     echo Please install it from: https://ollama.ai
     echo.
     echo After installing Ollama, run:
-    echo   ollama pull qwen2:7b
+    echo   ollama pull qwen3:14b
     echo.
 ) else (
     echo Ollama found!
     echo.
     echo Checking for required model...
-    ollama list | findstr "qwen2:7b" >nul 2>&1
+    ollama list | findstr "qwen3:14b" >nul 2>&1
     if %errorlevel% neq 0 (
-        echo Model qwen2:7b not found. Downloading...
-        echo This will download about 4.4GB - may take several minutes
-        ollama pull qwen2:7b
+        echo Model qwen3:14b not found. Downloading...
+        echo This will download about 9.3GB - may take several minutes
+        ollama pull qwen3:14b
     ) else (
-        echo Model qwen2:7b already installed!
+        echo Model qwen3:14b already installed!
     )
 )
 echo.
 
-REM Check for GLPK solver
-echo [5/5] Checking for GLPK solver...
-echo NOTE: GLPK installation on Windows requires manual setup
-echo.
-echo If you haven't installed GLPK yet:
-echo 1. Download from: https://sourceforge.net/projects/winglpk/
-echo 2. Extract to C:\glpk
-echo 3. Add C:\glpk\w64 to your PATH environment variable
-echo.
-echo See INSTALL_WINDOWS.md for detailed instructions
-echo.
+REM Solver note: the HiGHS solver is installed automatically by pip
+REM (the 'highspy' wheel in requirements.txt). No GLPK or manual
+REM solver install / PATH setup is required on Windows anymore.
 
 echo ========================================
 echo   Setup Complete!
@@ -109,8 +101,6 @@ echo    - Run: uvicorn api:app --reload --host 0.0.0.0 --port 8000
 echo    - Open browser to: http://localhost:8000
 echo.
 echo For help, see:
-echo - QUICKSTART.md (beginner's guide)
-echo - INSTALL_WINDOWS.md (detailed installation)
-echo - TROUBLESHOOTING.md (common issues)
+echo - deliverables\Run_on_Windows.pdf (setup, expected results, troubleshooting)
 echo.
 pause

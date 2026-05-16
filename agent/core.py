@@ -22,7 +22,7 @@ from typing import Dict, Any, List, Optional
 from llm.client import LLMClient
 from llm.intent_router import IntentRouter
 from llm.follow_up_handler import FollowUpHandler
-from solvers import get_solver, list_problem_types
+from solvers import get_default_solver_for_category, get_solver, list_problem_types
 from analysis.detector import AnalysisDetector
 from analysis.engine import AnalysisEngine
 from analysis import detect_analysis_type, execute_analysis, format_analysis_output
@@ -431,6 +431,49 @@ class OptimizationAgent:
             "units_info": explanation_result.get("units_info", {}),
         }
 
+    def follow_up_on_job(self, job_id: str, message: str) -> Dict[str, Any]:
+        """
+        Answer a free-text follow-up / what-if against a still-pending
+        heuristic_then_ask job, WITHOUT consuming it.
+
+        The chat UI funnels every message for a pending job to /chat/continue.
+        When the message is not an optimize/accept/use_heuristic action it used
+        to dead-end. Instead we synthesise a baseline solution from the job's
+        parameters (an exact solve — fast for these sizes) and route the
+        message through the normal follow-up path so "what if X changes"
+        actually re-solves and answers. The job is left intact so the user can
+        still 'optimize' or 'accept' afterwards.
+        """
+        record = self.job_store.get(job_id)
+        if record is None:
+            return {
+                "success": False,
+                "error": f"Job {job_id} not found or expired (10-minute TTL).",
+            }
+
+        solver = get_solver(record.solver_id)
+        baseline = solver.solve(record.params)
+
+        conversation_context: Dict[str, Any] = {
+            "messages": [],
+            "last_solution": {
+                "success": True,
+                "problem_type": record.problem_type,
+                "solver_id": record.solver_id,
+                "extracted_params": record.params,
+                "solution": baseline,
+            },
+        }
+
+        def _noop(_step: str, _progress: int) -> None:
+            pass
+
+        result = self._handle_follow_up(message, conversation_context, _noop)
+        # Job is still pending: the user can keep deciding optimize/accept.
+        result["job_id"] = job_id
+        result["job_pending"] = True
+        return result
+
     def _handle_follow_up(self, message: str, conversation_context: Dict, update_progress) -> Dict[str, Any]:
         """
         Handle follow-up questions about previous solutions.
@@ -471,18 +514,31 @@ class OptimizationAgent:
                     "deterministic": True
                 }
 
-        # Handle modifications
-        if follow_up_type == "modification":
-            return {
-                "success": True,
-                "type": "follow_up_modification",
-                "response": "Parameter modification detected. To implement changes, please describe the complete modified problem, or ask me to re-solve with specific changes (e.g., 'Re-solve with Seattle capacity = 500').",
-                "modification_targets": follow_up_result.get("modification_targets", [])
-            }
+        # Keyword-only analysis-type detection here (no LLM) — this is just a
+        # routing gate; the heavy LLM parse happens once inside the engine.
+        # Reuse the detected type downstream so we don't classify twice.
+        kw_analysis_type = detect_analysis_type(message)  # no llm_client
 
-        # Handle analysis requests
-        if follow_up_type == "analysis":
-            return self._handle_follow_up_analysis(message, conversation_context, update_progress)
+        # Modifications and analysis both route to the analysis engine, which
+        # actually re-solves and returns a concrete answer. Previously the
+        # "modification" branch dead-ended with a canned "please re-describe"
+        # message — that was the #8 follow-up bug.
+        if follow_up_type in ("modification", "analysis"):
+            return self._handle_follow_up_analysis(
+                message, conversation_context, update_progress,
+                analysis_type=(kw_analysis_type if kw_analysis_type != "unknown" else None),
+            )
+
+        # The lightweight keyword classifier frequently mislabels phrasings
+        # like "what if P2 capacity drops to 50?" as a plain question (it
+        # starts with "what"). If keyword detection finds a concrete
+        # what-if / sensitivity / resolve / pareto intent, run it rather than
+        # falling through to the generic response.
+        if kw_analysis_type != "unknown":
+            return self._handle_follow_up_analysis(
+                message, conversation_context, update_progress,
+                analysis_type=kw_analysis_type,
+            )
 
         # Generic follow-up response (fallback)
         return {
@@ -623,12 +679,13 @@ class OptimizationAgent:
 
         return result
 
-    def _handle_follow_up_analysis(self, message: str, conversation_context: Dict, update_progress) -> Dict[str, Any]:
+    def _handle_follow_up_analysis(self, message: str, conversation_context: Dict, update_progress, analysis_type: Optional[str] = None) -> Dict[str, Any]:
         """
         Handle follow-up analysis requests (sensitivity, what-if, resolve, pareto).
 
         This method:
-        1. Detects the type of analysis requested
+        1. Detects the type of analysis requested (skipped if the caller
+           already classified it — avoids a redundant LLM round-trip)
         2. Routes to appropriate analysis engine
         3. Stores results in analysis history
         4. Returns formatted results
@@ -655,8 +712,10 @@ class OptimizationAgent:
 
         update_progress("Detecting analysis type...", 10)
 
-        # Detect analysis type (with LLM for robust detection)
-        analysis_type = detect_analysis_type(message, self.llm)
+        # Use the caller-supplied classification when available; otherwise
+        # fall back to LLM detection (robust to typos / loose phrasing).
+        if analysis_type is None:
+            analysis_type = detect_analysis_type(message, self.llm)
 
         if analysis_type == 'unknown':
             return {
@@ -668,11 +727,22 @@ class OptimizationAgent:
 
         update_progress(f"Performing {analysis_type} analysis...", 40)
 
+        # Resolve the solver by its real solver_id. The solution carries the
+        # solver_id it was produced with; fall back to the category default
+        # (problem_type is a category like "TRANSPORTATION", NOT a solver_id).
+        solver_id = (
+            solution.get("solver_id")
+            or last_solution.get("solver_id")
+            or get_default_solver_for_category(
+                last_solution.get("problem_type", "TRANSPORTATION").lower()
+            )
+        )
+
         try:
             # Execute analysis
             results = execute_analysis(
                 analysis_type=analysis_type,
-                solver=get_solver(last_solution.get('problem_type', 'TRANSPORTATION').lower()),
+                solver=get_solver(solver_id),
                 params=params,
                 solution=solution,
                 query=message,
@@ -680,6 +750,25 @@ class OptimizationAgent:
             )
 
             if not results.get('success', False):
+                # A "validly infeasible" what-if is a useful answer, not an
+                # error: the user asked "what if X" and the honest answer is
+                # "that can't work, because…". Surface the plain-language
+                # reasons/suggestions the feasibility engine produced instead
+                # of the cryptic internal "failed at layer N" message.
+                if results.get('feasible') is False:
+                    conversation_context.setdefault("analysis_history", []).append({
+                        "query": message,
+                        "analysis_type": analysis_type,
+                        "results": results,
+                        "timestamp": message,
+                    })
+                    return {
+                        "success": True,
+                        "type": "follow_up_analysis",
+                        "analysis_type": analysis_type,
+                        "response": format_analysis_output(analysis_type, results),
+                        "raw_results": results,
+                    }
                 return {
                     "success": False,
                     "error": results.get('message', 'Analysis failed'),

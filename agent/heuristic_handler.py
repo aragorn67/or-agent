@@ -81,13 +81,19 @@ def run_heuristic_for_transport(
             "problem_type": problem_type,
         }
 
+    # VAM optimises variable cost only — it is fixed-charge-blind. But the
+    # cost we *report* for its routing must include the fixed charge it
+    # actually incurs on every opened route, otherwise the heuristic cost is
+    # understated and the gap-vs-bound goes nonsensically negative.
+    true_cost = vam.cost + _fixed_charge_total(params.get("fixed_cost"), vam.flows)
+
     bipartite = BipartiteTransportSolver()
     lp_result = bipartite.solve_lp_relaxation(params)
     lp_bound = lp_result.get("bound")
 
     gap_vs_bound: Optional[float] = None
-    if lp_bound is not None and vam.cost > 0:
-        gap_vs_bound = (vam.cost - lp_bound) / vam.cost
+    if lp_bound is not None and true_cost > 0:
+        gap_vs_bound = (true_cost - lp_bound) / true_cost
 
     flows_list = [
         {"plant": str(i), "market": str(j), "value": float(v)}
@@ -105,7 +111,7 @@ def run_heuristic_for_transport(
         solver_id=solver_id,
         params=params,
         heuristic_flows=vam.flows,
-        heuristic_cost=vam.cost,
+        heuristic_cost=true_cost,
         lp_bound=lp_bound,
         description=description,
         classification=classification,
@@ -121,8 +127,8 @@ def run_heuristic_for_transport(
         "solution": {
             "status": "HEURISTIC_FEASIBLE",
             "solver_id": "transport_vam",
-            "objective_value": vam.cost,
-            "objective": vam.cost,
+            "objective_value": true_cost,
+            "objective": true_cost,
             "best_bound": lp_bound,
             "gap": gap_vs_bound,
             "flows": flows_list,
@@ -130,7 +136,7 @@ def run_heuristic_for_transport(
             "warm_started": False,
             "is_heuristic": True,
         },
-        "summary": _format_heuristic_summary(vam.cost, lp_bound, gap_vs_bound),
+        "summary": _format_heuristic_summary(true_cost, lp_bound, gap_vs_bound),
     }
 
     if ask_to_continue:
@@ -142,6 +148,32 @@ def run_heuristic_for_transport(
         response["available_actions"] = ["optimize", "accept", "use_heuristic"]
 
     return response
+
+
+def _fixed_charge_total(fixed_cost: Any, flows: Dict) -> float:
+    """
+    Sum the fixed charge incurred by a heuristic's routing: one charge per
+    route that carries any flow. Returns 0.0 when the problem has no fixed
+    charges. Accepts either nested ({i: {j: c}}) or flat ({(i, j): c})
+    fixed-cost specs, matching what the solver/extractor produce.
+    """
+    if not fixed_cost:
+        return 0.0
+
+    def _lookup(i, j) -> float:
+        if isinstance(fixed_cost, dict):
+            if (i, j) in fixed_cost:
+                return float(fixed_cost[(i, j)])
+            row = fixed_cost.get(i)
+            if isinstance(row, dict) and j in row:
+                return float(row[j])
+        return 0.0
+
+    total = 0.0
+    for (i, j), v in flows.items():
+        if v and abs(v) > 1e-9:
+            total += _lookup(i, j)
+    return total
 
 
 def _format_heuristic_summary(

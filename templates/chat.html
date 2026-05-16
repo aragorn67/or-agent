@@ -204,14 +204,25 @@ async function send(){
         jobId = d.job_id;
       }
     } else {
-      startTyping('Parsing your reply & running exact solver…');
+      startTyping('Working on your reply…');
       const r = await fetch('/chat/continue', {
         method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ job_id:jobId, message:text })
       });
       const d = await r.json();
       stopTyping();
-      if (!d.success) {
+      if (d.job_pending) {
+        // Free-text follow-up / what-if answered against the still-pending
+        // job. Show the answer and keep the job open for a decision.
+        if (d.success) {
+          addMsg(d.response || d.summary || 'Done.', 'agent');
+        } else {
+          addMsg('⚠️ ' + (d.error || 'Could not handle that follow-up.'), 'agent');
+        }
+        addMsg('Still here — reply "optimize" for the exact solver, '
+             + '"accept" to keep the heuristic, or ask another what-if.',
+               'agent');
+      } else if (!d.success) {
         addMsg('❌ ' + (d.error || JSON.stringify(d)), 'agent');
       } else {
         const s = d.solution || {};
