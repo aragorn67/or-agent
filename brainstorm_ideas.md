@@ -823,3 +823,124 @@ exploitable due-date / changeover patterns) typically benefit more.
 For Phase 2 MVP we omit the bound from the chat response and rely on the
 heuristic Cmax as the headline number plus the exact solver's
 `best_objective_bound` after `/continue optimize`.
+
+---
+
+# 🔖 Picking up next session (2026-05-14 EOD)
+
+## Where we are
+Commit `3536a83` on `origin/main` (= `apostoliselekidis-star/Optimization-AI-`).
+Old aragorn67 remote preserved as `aragorn`.
+
+Phase 1 + Phase 2 of the locked plan are shipped. 83 tests passing. The
+warm-start payoff finding turned out to be honest-but-mixed: real on
+fixed-charge transport MIP (6.6×), absent on IPM scheduling (~1×). Both
+documented in `ANALYSIS.md`.
+
+## Chosen next step
+**End-to-end demo with Ollama** — finish task #8 from the original plan.
+Drive the full /solve mode=heuristic_then_ask → /chat/continue flow with
+qwen3:14b classifying and extracting from a real NL transport problem.
+
+## Demo plan (already prepared, just needs to run)
+
+1. Verify Ollama up: `curl -sf http://localhost:11434/api/tags`
+2. Start API with explicit backend (shell may still have `LLM_BACKEND=groq`
+   exported — must override):
+   ```bash
+   LLM_BACKEND=ollama ./Tolis_Env/bin/uvicorn api:app \
+       --host 127.0.0.1 --port 8765 --log-level warning &
+   ```
+3. Run the demo: `./Tolis_Env/bin/python demos/heuristic_two_call_demo.py`
+4. Capture clean output, paste into README and/or ANALYSIS.md as the
+   headline demo.
+5. If the LLM stumbles on the NL prompt (qwen3:14b sometimes classifies oddly),
+   tighten the prompt phrasing — the demo script's `PROBLEM` constant is a
+   good starting point but may need tweaks.
+
+## Options NOT taken this session — for the backlog
+
+- **Fixed-charge transport MIP solver.** Add binary "use this arc" + Big-M
+  to bipartite. Half-day. Makes the warm-start speedup story load-bearing
+  (6.6× in the original spike). This is the strongest demo unlock.
+- **Tighter scheduling formulation.** Replace IPM with positional or
+  time-indexed. 1-2 days; rewrite of `solvers/scheduling/single_stage_ipm.py`.
+  Would either rescue the scheduling warm-start story or confirm the
+  finding is solver-agnostic.
+- **Eval Phase 3 (metamorphic transforms).** Double costs → double
+  objective, permute plants → same objective, etc. Half-day. Hardens the
+  test surface; doesn't extend capabilities.
+- **LP relaxation for scheduling** (stubbed today). Requires factoring
+  build_model out of solve(). Small but useful — gives the user a bound
+  on Cmax during the heuristic call.
+
+## Open environmental note
+
+The shell at session end had `LLM_BACKEND=groq` exported, which silently
+broke the demo earlier. Permanent fix: `unset LLM_BACKEND` in the shell
+profile so the in-code default (Ollama) wins. Per-command override works
+in the meantime.
+
+---
+
+# 🔖 DEMO ROADMAP (approved 2026-05-15) — interactive demo, 1–2 day scope
+
+User-approved plan. Demo in 1–2 days. **In scope:** conversational polish,
+live progress, latency/structured input, graceful NL fallback.
+**Deferred:** NL constraint editing (#1), artificial-problem testing (#3).
+
+## Item list (user requests, this session)
+
+1. (DEFERRED) Change constraints/objectives in NL after a solve — needs a
+   re-extract/re-solve loop; too risky to land unstably 2 days pre-demo.
+2. Excel / database as input.
+3. (DEFERRED) Large-scale + artificial OR problems for classification.
+4. Investigate time bottlenecks (the ~147s `/solve` blocking call).
+5. After each solution, offer options to continue the discussion.
+6. App exports the result as an Excel file.
+7. App shows its progress live (esp. for the demo).
+8. Better understand user language (e.g. "pareto front" currently
+   dead-ends with a raw `CUSTOM_REVIEW` error).
+
+## Key grounding discoveries (cheaper than feared)
+
+- **#7 is not a refactor.** `agent/core.py` already emits stages via
+  `update_progress("Analyzing problem type...", 15)` →
+  `"Identified as X"` (25) → `"Extracting parameters..."` (40). The hooks
+  exist; Phase 1 only surfaces them through the API/UI.
+- **#8: Pareto already works — as a follow-up.** Full `analysis/` module
+  (`analysis/router.py`) wired into `agent/core.py:628` handles
+  `sensitivity / what_if / resolve / pareto` *after* a solve. The bug is a
+  first-message routing gap: no solver → `solver_id == "none"` → hard
+  dead-end at `core.py:145`. Fix = route/explain, not build a solver.
+
+## Phases (each independently demoable; commit after each)
+
+- **Phase 0 — prereqs (~15 min):** commit current uncommitted work
+  (fixed-charge MIP, UI, `fixed_cost` extraction) on a branch; verify
+  `openpyxl` / `pandas` in `Tolis_Env`, add if missing.
+- **Phase 1 — live progress backbone (#7, #4 dead-air):** refactor
+  `/solve` to job + poll; surface existing `update_progress` stages via
+  `GET /jobs/{id}/status`; `chat.html` shows a live pipeline checklist
+  instead of one spinner. Biggest single demo win; lands first because
+  the rest rides on the job model.
+- **Phase 2 — conversational polish (#5, #8, #6):** every response carries
+  `next_options` → clickable chips. Replace dead-ends with a friendly
+  explanation + supported-type chips; detect analysis-intent first
+  messages via `analysis/router.py` and respond conversationally. Excel
+  result export via `GET /jobs/{id}/export.xlsx` (openpyxl).
+- **Phase 3 — latency + structured input (#4, #2):** profile classify vs
+  extract vs solve (Phase 1 already exposes per-stage timing); log to
+  ANALYSIS.md. `POST /solve/file` (multipart `.xlsx`) → pandas parser →
+  params → solve, skipping both qwen3 calls (~147s → ~1s). The
+  spreadsheet path is the "instant" demo lane.
+
+## Cut order if time runs short
+
+Phase 1 (must-have) → Phase 2 → Phase 3. Phase 1 alone transforms the demo.
+
+## Status at log-off (2026-05-15)
+
+Map approved and recorded. **Nothing built yet** — next session starts at
+Phase 0. Session work prior to this (fixed-charge MIP + UI + extraction)
+is still uncommitted; Phase 0 commits it first.

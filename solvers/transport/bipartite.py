@@ -7,12 +7,14 @@ Handles single-commodity transportation from plants to markets with:
 - Demand requirements at markets
 - Linear transportation costs (distance * freight rate)
 
+Optionally supports:
+- Fixed charges per route (binary open/close decision -> MIP)
+- Arc capacity limits
+
 Does NOT support:
 - Transshipment / intermediate nodes
 - Multi-commodity flow
 - Time-indexed / multi-period
-- Fixed charges
-- Arc capacity limits
 """
 
 from typing import Dict, List, Any, Optional, Tuple
@@ -172,6 +174,12 @@ class BipartiteTransportSolver(OptimizationSolver):
         if arc_capacity is not None:
             arc_capacity = self._normalize_distance(arc_capacity)
 
+        # Handle fixed charges (if provided) -> turns the LP into a MIP.
+        # fixed_cost[i,j] is incurred once iff route (i,j) carries any flow.
+        fixed_cost = params.get("fixed_cost", None)
+        if fixed_cost is not None:
+            fixed_cost = self._normalize_distance(fixed_cost)
+
         # Build Pyomo model
         m = ConcreteModel()
 
@@ -196,9 +204,31 @@ class BipartiteTransportSolver(OptimizationSolver):
         # Variables
         m.x = Var(m.I, m.J, domain=NonNegativeReals)
 
-        # Objective (total cost in thousand $)
+        # Fixed-charge structure: binary "is route (i,j) open?" + big-M link.
+        # big-M is the tightest valid flow upper bound on the arc:
+        # min(supply_i, demand_j, arc_cap_ij) — keeps the LP relaxation strong.
+        if fixed_cost is not None:
+            m.fc = Param(m.I, m.J, initialize=fixed_cost, default=0.0)
+            m.y = Var(m.I, m.J, domain=Binary)
+
+            def bigM(i, j):
+                ub = min(capacity[i], demand[j])
+                if arc_capacity is not None and (i, j) in arc_capacity:
+                    ub = min(ub, arc_capacity[(i, j)])
+                return ub
+
+            def link_rule(m, i, j):
+                return m.x[i, j] <= bigM(i, j) * m.y[i, j]
+            m.fixed_charge_link = Constraint(m.I, m.J, rule=link_rule)
+
+        # Objective (total cost in thousand $); adds fixed charges when present.
         def obj_rule(m):
-            return sum(m.c[i, j] * m.x[i, j] for i in m.I for j in m.J)
+            transport = sum(m.c[i, j] * m.x[i, j] for i in m.I for j in m.J)
+            if fixed_cost is not None:
+                return transport + sum(
+                    m.fc[i, j] * m.y[i, j] for i in m.I for j in m.J
+                )
+            return transport
         m.OBJ = Objective(rule=obj_rule, sense=minimize)
 
         # Constraints
@@ -266,9 +296,16 @@ class BipartiteTransportSolver(OptimizationSolver):
         warm_start_applied = False
         if warm_start and _model_has_integer_vars(m):
             valid_keys = {(ii, jj) for ii in m.I for jj in m.J}
+            has_y = hasattr(m, "y")
             for (i, j), v in warm_start.items():
-                if (str(i), str(j)) in valid_keys:
-                    m.x[str(i), str(j)].value = float(v)
+                key = (str(i), str(j))
+                if key in valid_keys:
+                    fv = float(v)
+                    m.x[key].value = fv
+                    # Seed the open/close decision consistently with the flow,
+                    # so HiGHS starts from a complete feasible incumbent.
+                    if has_y:
+                        m.y[key].value = 1 if fv > 1e-9 else 0
             warm_start_applied = True
 
         solver = Highs()
@@ -301,7 +338,7 @@ class BipartiteTransportSolver(OptimizationSolver):
                 str(j): float(sum(value(m.x[i, j]) for i in m.I)) for j in m.J
             }
 
-            return {
+            result = {
                 "status": status,
                 "solver_id": self.solver_id,
                 "objective_value": objective_val,
@@ -316,6 +353,13 @@ class BipartiteTransportSolver(OptimizationSolver):
                 },
                 "warm_started": warm_start_applied,
             }
+            if hasattr(m, "y"):
+                result["open_routes"] = [
+                    {"plant": str(i), "market": str(j)}
+                    for i in m.I for j in m.J
+                    if value(m.y[i, j]) > 0.5
+                ]
+            return result
 
         return {
             "status": status,

@@ -8,7 +8,10 @@
 #                        Accepts mode={exact|heuristic|heuristic_then_ask}
 #   POST /continue     — resume a heuristic-mode job by job_id + action
 #   POST /agent/classify — classify problem type without solving
+from pathlib import Path
+
 from fastapi import FastAPI
+from fastapi.responses import HTMLResponse
 
 from agent.core import OptimizationAgent
 from config import config
@@ -21,8 +24,17 @@ app = FastAPI(title="Optimization Agent API", version="1.1.0")
 agent = OptimizationAgent(config.get_llm_client())
 
 
-@app.get("/")
-def root():
+_CHAT_HTML = Path(__file__).parent / "templates" / "chat.html"
+
+
+@app.get("/", response_class=HTMLResponse)
+def chat_ui():
+    """Serve the conversational demo UI (two-call heuristic_then_ask flow)."""
+    return _CHAT_HTML.read_text(encoding="utf-8")
+
+
+@app.get("/api/info")
+def api_info():
     return {
         "service": "Optimization Agent API",
         "docs": "/docs",

@@ -41,6 +41,7 @@ Extract parameters for a Transportation LP. Output STRICT JSON with keys:{rag_co
 - demand: {{market: number}} (how much each market needs)
 - cost: {{plant: {{market: number}}}} (per-unit shipping cost from plant to market)
 - arc_capacity: {{plant: {{market: number}}}} (OPTIONAL: maximum flow on individual routes/lanes. e.g., "From F1 to A: max 50 units, to B: 30, to C: 0" means arc_capacity={{F1: {{A: 50, B: 30, C: 0}}}}. INCLUDE ZERO CAPACITIES! Zero means blocked route.)
+- fixed_cost: {{plant: {{market: number}}}} (OPTIONAL: one-time fixed charge incurred if a route is used AT ALL, independent of volume. Triggered by "fixed cost to open/use a route", "setup cost", "fixed charge". A single value applied to every route means the same number for all plant×market pairs.)
 - constraints: string[] (optional: special restrictions like "Plant A cannot serve Market X")
 - integer_shipments: boolean (optional, default false - if shipments must be whole numbers)
 - allow_unbalanced: boolean (optional, default false - if total supply != total demand is OK)
@@ -54,6 +55,7 @@ EXTRACTION RULES:
 6. If freight rate given (e.g., "$90 per unit per 1000 miles"), combine with distances
 7. **IMPORTANT: Extract arc_capacity if problem mentions "maximum shipping capacity", "lane capacity", "route limits", or "from X to Y: max N units"**
 8. **CRITICAL: When extracting arc_capacity, include ALL routes mentioned, even if capacity is 0! A capacity of 0 means that route is blocked. Missing entries will be treated as infinite capacity!**
+8b. **If a fixed/setup charge is mentioned for opening or using a route, extract fixed_cost for EVERY plant×market route. If one flat number applies to all routes, repeat it for each pair. Omit fixed_cost entirely if no fixed charge is mentioned (keeps the problem a pure LP).**
 9. **If cost values are not specified or text says "values not important", use $1 per unit for all routes**
 10. **CRITICAL: ALWAYS extract all available data. If something looks wrong (negative capacity, missing data), extract what you can AND add an "error" field describing the issue. DO NOT return error-only JSON**
 11. All numbers must be numeric LITERALS, not strings and not expressions.

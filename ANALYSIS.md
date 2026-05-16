@@ -5,6 +5,92 @@ entry follows **Problem → Solution → Results**. Add new entries at the top.
 
 ---
 
+## 2026-05-15 — Demo UI + fixed-charge NL extraction wiring
+
+**Problem.** Needed a presentable UI for a live demo. The repo had only a
+JSON API; the sole UI was an archived `chat.html` calling the dead
+`/solve/natural` single-shot endpoint. Separately, the new fixed-charge
+solver was unreachable from natural language — the transport extractor never
+emitted `fixed_cost`, so a fixed-charge prompt silently solved as pure LP.
+
+**Solution.** (1) `api.py` now serves a rewired single-file
+`templates/chat.html` at `GET /` (JSON index moved to `/api/info`). The UI
+drives the real two-call protocol: `POST /solve mode=heuristic_then_ask`,
+then `POST /chat/continue`, with a live elapsed-seconds spinner (Ollama's
+first parse is ~2 min) and a "New" button to reset the job. (2) Added a
+`fixed_cost` field + extraction rules to `llm/transportation_specialist.py`,
+mirroring the existing `arc_capacity` pattern; omitted when no fixed charge
+is mentioned so pure-LP problems stay LP.
+
+**Results.** End-to-end via the same endpoints the UI uses (Ollama
+qwen3:14b): fixed-charge NL → extracted `fixed_cost` → heuristic_then_ask
+returns VAM 160 (fixed-charge-blind) + LP bound 1660 → "yes optimize it" →
+exact MIP OPTIMAL **1660**, gap 0, 3 routes opened (P1→M1, P1→M2, P2→M3),
+`warm_started=True`. 134 tests pass; the 2 fails / 3 errors are pre-existing
+and unrelated (real-LLM flakiness, stale deepseek config assertion,
+collection fixture) — none touch the changed files.
+
+**Diagnosis.** Demo path is solid. The VAM-vs-bound spread (160 vs 1660) is
+the fixed-charge-blind heuristic from the entry below made visible in the UI
+— honest, and a good talking point rather than a flaw to hide.
+
+---
+
+## 2026-05-15 — Fixed-charge transport MIP + honest warm-start result
+
+**Problem.** The 6.6x warm-start spike cited below was an ad-hoc experiment;
+there was no real fixed-charge solver in the codebase. Build one and verify
+whether the VAM warm-start payoff actually holds.
+
+**Solution.** Added optional fixed charges to `BipartiteTransportSolver`:
+`fixed_cost[i,j]` param -> binary `y[i,j]` (route open?) + tight big-M link
+`x[i,j] <= min(supply_i, demand_j, arc_cap) * y[i,j]`, objective gains
+`sum(fc * y)`. Auto-trips `_model_has_integer_vars` so the existing
+warm-start gate and `relax_integer_vars` LP-bound path engage with no other
+changes. Warm-start now also seeds `y` (1 iff seeded flow > 0). 11 tests
+pass (5 new + 6 transport regression).
+
+**Results.** Solver correct: open-route consolidation, valid LP bound below
+MIP optimum, warm == cold optimum. **But warm-start gives no speedup**: a
+5-seed sweep (22x30, tight 1.12x supply slack, instances 1.4s–83s) shows
+**1.00–1.02x** every time, objectives identical.
+
+**Diagnosis.** VAM minimizes *transport cost only* — it is blind to fixed
+charges. Once the solver adds `sum(fc*y)`, the VAM incumbent is no better
+than what HiGHS's internal feasibility heuristics find on their own, so
+seeding it changes nothing. The earlier "6.6x" was a non-representative
+single instance, not a robust effect. **The real lever is a fixed-charge-
+aware construction heuristic** (greedy that prices in fc when opening a
+route) — logged as backlog, not built this session. Honest mixed result,
+consistent with the scheduling/transport warm-start entries below.
+
+---
+
+## 2026-05-15 — End-to-end two-call protocol with real Ollama stack
+
+**Problem.** The two-call `heuristic_then_ask` protocol (VAM/LPT + bound,
+then free-text follow-up → exact solve) had only been exercised with stubbed
+LLM calls. We needed to confirm it survives a real qwen3:14b run via Ollama
+end to end, including free-text intent parsing.
+
+**Solution.** Ran `demos/heuristic_two_call_demo.py` against a live
+`LLM_BACKEND=ollama` API server (qwen3:14b for classify/extract/parse).
+Classic GAMS `trnsport` instance, two HTTP turns.
+
+**Results.** Full pipeline green. Step 1 (NL → classify → extract → VAM +
+LP bound): **146.8s**, dominated by qwen3 classify+extract. VAM cost
+153675.00 == LP bound, gap 0.0000% → flagged provably optimal. Step 2 (free
+text "yes can you make it better" → intent parse → exact solve): **22.3s**,
+parsed action `optimize`, HiGHS confirms OPTIMAL 153675.00, gap 0.0. As
+expected `warm_started=False` (pure LP, warm-start gate correctly skipped —
+see scheduling/transport entries below).
+
+**Diagnosis.** Protocol and free-text routing are sound with the real local
+model. The ~147s step-1 latency is entirely LLM inference (two qwen3 calls),
+not solver — relevant for live demo pacing: pre-warm or narrate the wait.
+
+---
+
 ## 2026-05-14 — Warm-start on single-stage scheduling IPM
 
 **Problem.** Phase 2 promised a dramatic warm-start payoff for scheduling
