@@ -8,17 +8,23 @@
 #                        Accepts mode={exact|heuristic|heuristic_then_ask}
 #   POST /continue     — resume a heuristic-mode job by job_id + action
 #   POST /agent/classify — classify problem type without solving
+import io
 import threading
 from pathlib import Path
 
 from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 
-from agent.core import OptimizationAgent
+from agent.core import OptimizationAgent, build_next_options
 from agent.progress_store import ProgressStore
 from config import config
 from llm.continue_intent import parse_continue_action
-from schemas.requests import ChatContinueRequest, ContinueRequest, NaturalLanguageRequest
+from schemas.requests import (
+    ChatContinueRequest,
+    ContinueRequest,
+    ExportRequest,
+    NaturalLanguageRequest,
+)
 
 
 app = FastAPI(title="Optimization Agent API", version="1.1.0")
@@ -72,7 +78,14 @@ def get_agent_capabilities():
 def solve_natural_language(req: NaturalLanguageRequest):
     """Synchronous solve (back-compat). For the live-progress UI use
     POST /jobs + GET /jobs/{run_id}."""
-    return agent.solve_natural_language(req.description, mode=req.mode)
+    return _with_options(agent.solve_natural_language(req.description, mode=req.mode))
+
+
+def _with_options(result: dict) -> dict:
+    """Attach continuation chips (Phase 2 #5) to any payload before it leaves
+    the API. Single chokepoint so every code path gets next_options."""
+    result["next_options"] = build_next_options(result)
+    return result
 
 
 def _run_solve(run_id: str, description: str, mode: str) -> None:
@@ -85,7 +98,7 @@ def _run_solve(run_id: str, description: str, mode: str) -> None:
         result = agent.solve_natural_language(
             description, progress_callback=on_progress, mode=mode
         )
-        progress_store.finish(run_id, result)
+        progress_store.finish(run_id, _with_options(result))
     except Exception as exc:  # noqa: BLE001 — surface any failure to the poller
         progress_store.fail(run_id, f"{type(exc).__name__}: {exc}")
 
@@ -123,7 +136,7 @@ def get_job(run_id: str):
 
 @app.post("/continue")
 def continue_job(req: ContinueRequest):
-    return agent.continue_job(req.job_id, req.action)
+    return _with_options(agent.continue_job(req.job_id, req.action))
 
 
 @app.post("/chat/continue")
@@ -134,10 +147,64 @@ def chat_continue(req: ChatContinueRequest):
         # Not an optimize/accept/use_heuristic action. Treat it as a free-text
         # follow-up / what-if against the still-pending job instead of
         # dead-ending. The job stays alive so the user can still decide.
-        return agent.follow_up_on_job(req.job_id, req.message)
+        return _with_options(agent.follow_up_on_job(req.job_id, req.message))
     result = agent.continue_job(req.job_id, action)
     result["parsed_action"] = action
-    return result
+    return _with_options(result)
+
+
+@app.post("/export/xlsx")
+def export_xlsx(req: ExportRequest):
+    """Phase 2 #6: turn a solved payload into a downloadable .xlsx workbook.
+
+    Always writes a Summary sheet plus a domain detail sheet — shipment flows
+    for transportation, the order→unit schedule for scheduling.
+    """
+    import pandas as pd
+
+    sol = req.solution or {}
+    params = req.extracted_params or {}
+
+    summary = [
+        ("Problem type", req.problem_type or "—"),
+        ("Status", sol.get("status", "—")),
+        ("Objective", sol.get("objective_value", sol.get("objective", "—"))),
+        ("Best bound", sol.get("best_bound", "—")),
+        ("Gap", sol.get("gap", "—")),
+        ("Heuristic", sol.get("is_heuristic", False)),
+        ("Warm-started", sol.get("warm_started", "—")),
+    ]
+
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as xw:
+        pd.DataFrame(summary, columns=["Metric", "Value"]).to_excel(
+            xw, sheet_name="Summary", index=False
+        )
+        if sol.get("flows"):
+            pd.DataFrame(sol["flows"]).to_excel(
+                xw, sheet_name="Flows", index=False
+            )
+        if sol.get("assignments"):
+            df = pd.DataFrame(sol["assignments"])
+            comp = sol.get("completion") or {}
+            if comp:
+                df["completion"] = df.get("order", df.iloc[:, 0]).map(comp)
+            df.to_excel(xw, sheet_name="Schedule", index=False)
+        if params:
+            flat = {k: str(v) for k, v in params.items()}
+            pd.DataFrame(
+                list(flat.items()), columns=["Parameter", "Value"]
+            ).to_excel(xw, sheet_name="Parameters", index=False)
+    buf.seek(0)
+
+    fname = f"{(req.problem_type or 'solution').lower()}_result.xlsx"
+    return StreamingResponse(
+        buf,
+        media_type=(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        ),
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
 
 
 @app.post("/agent/classify")

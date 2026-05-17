@@ -1028,15 +1028,70 @@ renders no-solution responses plainly. 7 tests in
 `test_first_message_analysis.py`; live smoke-verified. **Uncommitted**
 (stacks on the still-uncommitted Phase 1 work).
 
-Revised loose-end order next session:
-1. Commit (Phase 1 + Phase 2 dead-end + ANALYSIS/brainstorm edits).
-   Files: `agent/progress_store.py`, `agent/core.py`, `api.py`,
-   `templates/chat.html`, `tests/test_progress_jobs.py`,
-   `tests/test_first_message_analysis.py`, `ANALYSIS.md`,
-   `brainstorm_ideas.md`.
-2. **Phase 2 remainder:** #5 continuation chips (`next_options`);
-   #6 `GET /jobs/{id}/export.xlsx` (openpyxl/pandas installed).
-3. **Phase 3:** `POST /solve/file` (.xlsx → params → solve) +
-   per-stage latency profiling to ANALYSIS.md.
+## Update — Phase 1+2 + deliverables, COMMITTING (2026-05-16, end of session)
+
+Done & being committed this session (one commit, code + docs + binary PDF):
+Phase 1 live progress, Phase 2 first-message dead-end, deliverable PDF
+overhaul (Tolaros removed; +feasibility-gate / three-approaches-classifier
+/ warm-start sections), forgotten-subsystem audit (`ML_RAG_archive/`,
+`or_classify/` → memory + ANALYSIS.md). 32/32 tests green.
+
+## Update — Phase 2 #5 + interactivity pass DONE (2026-05-17)
+
+#5 continuation chips done **and scope-expanded** (user: "make the chat
+box more interactive", picked all 4 options):
+- `build_next_options(result)` in `agent/core.py` — pure fn, result→chips;
+  applied at one API chokepoint (`_with_options`) so every path
+  (sync/async/continue/chat) carries `next_options`. 8 states verified.
+- Persistent toolbar in `chat.html` (New / Help / 2 examples) — never
+  stuck even with no chips.
+- Client-derived chips: quick what-ifs synthesised from real
+  `extracted_params` (e.g. "🔻 P1 capacity −20%"), Show table,
+  Explain more.
+- #6 folded forward as `POST /export/xlsx` (takes the payload the chat
+  already holds → workbook; sidesteps the job-store TTL of the planned
+  GET-by-id form). Summary + Flows/Schedule + Parameters sheets;
+  TestClient-verified for transport & scheduling.
+Zero regressions: new logic green; the only suite reds
+(`test_default_config`, classification errors, full-run-ordering
+`test_feasible_us_manufacturing`) all pre-exist on a clean tree.
+**Uncommitted.**
+
+**RESUME POINT — "lets continue" picks up here:**
+1. Commit this interactivity pass (core.py/api.py/schemas/chat.html +
+   ANALYSIS.md + brainstorm).
+2. Live smoke in the browser (chips click-through, export download) —
+   only static review done so far, no running-server check.
+3. Phase 3: `POST /solve/file` (.xlsx → params → solve) + per-stage
+   latency profiling to ANALYSIS.md.
 4. *Optional micro-opt:* move keyword analysis check before
    `detect_intent` so the bare-what-if path is fully LLM-free.
+
+## Agentic roadmap — on-thesis only (added 2026-05-17)
+
+Governing constraint: the LLM **routes to published/validated OR models
+and builds on them; it never invents the formulation**. Open-ended LLM
+model-construction ("#1") is **rejected as off-thesis**, not deferred.
+Endorsed agentic upgrades must stay inside the validated-model envelope.
+
+**A2 — Multi-stage decomposition (composer over the solver registry).**
+Decompose a compound request (e.g. "design my supply chain") into a
+*per-request sequence of EXISTING registered solvers* (location →
+transport → scheduling), wiring each stage's output into the next. The
+LLM chooses which registered solvers and in what order — never writes
+math. Agentic pattern: plan-and-execute over the registry; each node is
+a provably-correct solver. *Off-thesis tripwire:* a stage needing a
+model not in the registry → stop and tell the user, do not synthesise.
+
+**A3 — Autonomous infeasibility repair (within a known formulation).**
+Replace the capped 3 deterministic retries with an LLM reason→edit→
+re-check→revise loop (Reflexion-style) that proposes edits to the
+*parameters / toggleable constraints of the already-selected model*
+(relax a bound, drop an optional constraint, flag a contradiction). Same
+envelope as today's loop, better convergence. *Off-thesis tripwire:*
+repair that requires a structurally different / unregistered model →
+escalate to the user, do not reformulate.
+
+Both are real "remove the hard ceiling" items and are the next agentic
+direction after the deterministic backlog (Phase 3) is closed. See
+memory `project_design_thesis` for the rationale and the tripwire rule.

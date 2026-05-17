@@ -51,6 +51,21 @@
            padding:0 18px; height:44px; font-size:16px; cursor:pointer; }
   button:disabled { opacity:.5; cursor:not-allowed; }
   .secondary { background:#eceefb; color:#4a4f63; font-size:13px; }
+  .toolbar { display:flex; gap:8px; flex-wrap:wrap; padding:8px 16px 0;
+             background:#fff; }
+  .tbtn { background:#eceefb; color:#4a4f63; border:none; border-radius:8px;
+          height:32px; padding:0 12px; font-size:12.5px; cursor:pointer; }
+  .tbtn:hover { background:#dfe2f7; }
+  .chips { display:flex; flex-wrap:wrap; gap:8px; margin:2px 0 14px 44px; }
+  .chip { background:#fff; border:1px solid #c7cce8; color:#4a4f63;
+          border-radius:999px; padding:6px 12px; font-size:12.5px;
+          cursor:pointer; transition:.12s; }
+  .chip:hover { border-color:#667eea; color:#3b3f8f;
+                box-shadow:0 2px 6px rgba(102,126,234,.18); }
+  .dtable { border-collapse:collapse; margin-top:8px; font-size:12.5px; }
+  .dtable th,.dtable td { border:1px solid #e1e6fb; padding:4px 8px;
+                          text-align:left; }
+  .dtable th { background:#f0f2fc; }
 </style>
 </head>
 <body>
@@ -77,9 +92,14 @@
       <div class="typing" id="typing"></div>
     </div>
 
+    <div class="toolbar" id="toolbar">
+      <button class="tbtn" type="button" data-act="new">🆕 New</button>
+      <button class="tbtn" type="button" data-act="help">❓ Help</button>
+      <button class="tbtn" type="button" data-act="ex0">💼 Transport example</button>
+      <button class="tbtn" type="button" data-act="ex1">🏭 Fixed-charge example</button>
+    </div>
+
     <div class="inputbar">
-      <button id="resetBtn" class="secondary" type="button"
-              title="Start a new problem">New</button>
       <textarea id="input" rows="1"
         placeholder="Describe your optimization problem…"></textarea>
       <button id="sendBtn" type="button">➤</button>
@@ -97,7 +117,9 @@ const welcome  = document.getElementById('welcome');
 const typing   = document.getElementById('typing');
 const input    = document.getElementById('input');
 const sendBtn  = document.getElementById('sendBtn');
-const resetBtn = document.getElementById('resetBtn');
+const toolbar  = document.getElementById('toolbar');
+
+let lastPayload = null;   // most recent successful solve payload (for table/export)
 
 let jobId = null;          // null => next message starts a new problem
 let timer = null;
@@ -110,9 +132,19 @@ input.addEventListener('keydown', e => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
 });
 sendBtn.addEventListener('click', send);
-resetBtn.addEventListener('click', () => {
-  jobId = null;
+
+function newProblem(){
+  jobId = null; lastPayload = null;
   addMsg('🔄 New problem — describe it below.', 'agent');
+  input.focus();
+}
+toolbar.addEventListener('click', e => {
+  const act = e.target.getAttribute('data-act');
+  if (!act) return;
+  if (act === 'new')  return newProblem();
+  if (act === 'help') { input.value = 'help'; send(); return; }
+  if (act === 'ex0')  return useExample(0);
+  if (act === 'ex1')  return useExample(1);
 });
 
 function useExample(i){
@@ -150,6 +182,133 @@ function card(rows){
     r.appendChild(kk); r.appendChild(vv); c.appendChild(r);
   });
   return c;
+}
+
+// ---- continuation chips + interactive solution actions ----
+function onChip(opt){
+  if (opt.action === 'new')     return newProblem();
+  if (opt.action === 'example') return useExample(opt.index);
+  if (opt.action === 'help')  { input.value = 'help'; return send(); }
+  if (opt.action === 'table')   return renderTable();
+  if (opt.action === 'export')  return doExport();
+  if (opt.fill){                       // prefill, let the user tweak specifics
+    input.value = opt.message;
+    input.focus();
+    input.dispatchEvent(new Event('input'));
+    return;
+  }
+  input.value = opt.message; send();   // concrete one-click action
+}
+
+function addChips(options){
+  if (!options || !options.length) return;
+  const row = document.createElement('div');
+  row.className = 'chips';
+  options.forEach(opt => {
+    const b = document.createElement('button');
+    b.className = 'chip';
+    b.type = 'button';
+    b.textContent = opt.label;
+    b.addEventListener('click', () => onChip(opt));
+    row.appendChild(b);
+  });
+  messages.insertBefore(row, typing);
+  messages.scrollTop = messages.scrollHeight;
+}
+
+// Concrete what-ifs synthesised from the actual extracted params, so the
+// user can probe the model without phrasing a query.
+function quickWhatIfs(d){
+  const p = (d && d.extracted_params) || {};
+  const out = [];
+  const plants  = p.plants  || Object.keys(p.capacity || {});
+  const markets = p.markets || Object.keys(p.demand   || {});
+  if (plants[0])  out.push({ label:`🔻 ${plants[0]} capacity −20%`,
+                  message:`what if ${plants[0]} capacity drops by 20%` });
+  if (markets[0]) out.push({ label:`🔺 ${markets[0]} demand +20%`,
+                  message:`what if ${markets[0]} demand increases by 20%` });
+  if (plants[0])  out.push({ label:`📊 sensitivity: ${plants[0]} capacity`,
+                  message:`sensitivity on ${plants[0]} capacity`, fill:true });
+  if (!out.length){
+    const orders = p.orders || Object.keys(p.processing_time || {});
+    if (orders[0]) out.push({ label:`⏱ ${orders[0]} time +20%`,
+        message:`what if processing time of ${orders[0]} increases by 20%` });
+  }
+  return out.slice(0, 3);
+}
+
+// Merge server routing chips with client-derived solution/what-if chips,
+// keeping a single "New problem" at the end.
+function chipsFor(d){
+  let base = (d.next_options || []).slice();
+  const newOpt = base.find(o => o.action === 'new');
+  base = base.filter(o => o.action !== 'new');
+  const extra = [];
+  if (d.success && d.solution){
+    extra.push(...quickWhatIfs(d));
+    extra.push({ label:'📋 Show table',   action:'table'  });
+    extra.push({ label:'🔍 Explain more', message:'explain the solution in more detail' });
+    extra.push({ label:'📥 Export .xlsx', action:'export' });
+  }
+  const seen = new Set();
+  const all = [...base, ...extra, ...(newOpt ? [newOpt] : [])];
+  return all.filter(o => { const k = o.label; if (seen.has(k)) return false;
+                           seen.add(k); return true; });
+}
+
+function showChips(d){ addChips(chipsFor(d)); }
+
+function renderTable(){
+  const s = lastPayload && lastPayload.solution;
+  if (!s){ addMsg('Nothing to tabulate yet.', 'agent'); return; }
+  let cols, rows;
+  if (s.flows && s.flows.length){
+    cols = ['plant', 'market', 'value'];
+    rows = s.flows.map(f => [f.plant, f.market, f.value]);
+  } else if (s.assignments && s.assignments.length){
+    const comp = s.completion || {};
+    cols = ['order', 'unit', 'completion'];
+    rows = s.assignments.map(a => [a.order, a.unit, comp[a.order] ?? '—']);
+  } else {
+    addMsg('No tabular flows/assignments in this solution.', 'agent');
+    return;
+  }
+  const t = document.createElement('table');
+  t.className = 'dtable';
+  const hr = document.createElement('tr');
+  cols.forEach(c => { const th = document.createElement('th');
+                      th.textContent = c; hr.appendChild(th); });
+  t.appendChild(hr);
+  rows.forEach(r => { const tr = document.createElement('tr');
+    r.forEach(v => { const td = document.createElement('td');
+                     td.textContent = v; tr.appendChild(td); });
+    t.appendChild(tr); });
+  addMsg('Solution detail:', 'agent', [t]);
+}
+
+async function doExport(){
+  if (!lastPayload){ addMsg('Nothing to export yet.', 'agent'); return; }
+  try {
+    const r = await fetch('/export/xlsx', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        problem_type:    lastPayload.problem_type,
+        extracted_params:lastPayload.extracted_params || {},
+        solution:        lastPayload.solution || {},
+      })
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = (lastPayload.problem_type || 'solution').toLowerCase() + '_result.xlsx';
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+    addMsg('📥 Workbook downloaded.', 'agent');
+  } catch (e) {
+    addMsg('❌ Export failed: ' + e.message, 'agent');
+  }
 }
 
 function startTyping(label){
@@ -232,11 +391,13 @@ async function send(){
         addMsg('❌ The solve could not start or timed out.', 'agent');
       } else if (!d.success) {
         addMsg('❌ ' + (d.error || JSON.stringify(d)), 'agent');
+        showChips(d);
       } else if (!d.solution) {
         // Conversational reply with no solution to render — a first-message
         // what-if guide, smalltalk, or help. Show the text plainly instead
         // of a broken card with NaN cost.
         addMsg(d.response || d.summary || 'Done.', 'agent');
+        showChips(d);
       } else {
         const s = d.solution || {};
         const gap = s.gap != null ? (s.gap*100).toFixed(4)+'%' : 'n/a';
@@ -253,6 +414,8 @@ async function send(){
           'Reply "optimize" to run the exact solver, or "accept" to keep this.',
           'agent');
         jobId = d.job_id;
+        lastPayload = d;
+        showChips(d);
       }
     } else {
       startTyping('Working on your reply…');
@@ -273,8 +436,11 @@ async function send(){
         addMsg('Still here — reply "optimize" for the exact solver, '
              + '"accept" to keep the heuristic, or ask another what-if.',
                'agent');
+        if (d.solution) lastPayload = d;
+        showChips(d);
       } else if (!d.success) {
         addMsg('❌ ' + (d.error || JSON.stringify(d)), 'agent');
+        showChips(d);
       } else {
         const s = d.solution || {};
         const gap = s.gap != null ? (s.gap*100).toFixed(6)+'%' : 'n/a';
@@ -289,8 +455,10 @@ async function send(){
         if (s.open_routes) rows.push(['Open routes', s.open_routes.length]);
         addMsg(d.summary || 'Done.', 'agent', [ card(rows) ]);
         jobId = null;   // problem solved; next message starts fresh
+        lastPayload = d;
         addMsg('✅ Solved. Press "New" or just describe another problem.',
                'agent');
+        showChips(d);
       }
     }
   } catch (e) {

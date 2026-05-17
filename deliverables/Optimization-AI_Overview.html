@@ -91,7 +91,7 @@ extraction fails loudly instead of producing a confident wrong answer.</p>
 <li>Deterministic numeric output (same answer every run, any machine)</li>
 <li>Runs fully local &amp; private (Ollama / qwen3:14b) &mdash; no data leaves the box</li>
 <li>Round-trip eval harness: 3/3 pass, recall 1.0</li>
-<li>Classifier choice validated against ML, RAG &amp; taxonomy baselines &mdash; three approaches built and benchmarked, simplest won on evidence (&sect;7)</li>
+<li>Classifier choice validated against ML, RAG &amp; taxonomy baselines &mdash; three approaches built and benchmarked, simplest won on evidence (&sect;8)</li>
 </ul>
 </td>
 <td>
@@ -135,13 +135,63 @@ demand), then an LP-relaxation solve. An infeasible instance returns
 plain-language reasons <em>and concrete repair suggestions</em>, and is
 remembered so the next message can fix it.</li>
 <li><strong>Mode routing</strong> &mdash; <code>exact</code>,
-<code>heuristic</code>, or <code>heuristic_then_ask</code> (see &sect;2).</li>
+<code>heuristic</code>, or <code>heuristic_then_ask</code> (see &sect;3).</li>
 <li><strong>Solve &rarr; explain</strong> &mdash; Pyomo + HiGHS produces the
 numbers; the LLM narrates them. The solution is stored in the conversation
 context so follow-ups and what-ifs work against it.</li>
 </ol>
 
-<h2>2. The two-call heuristic protocol</h2>
+<h2>2. Why a pipeline, not an agent framework</h2>
+<p>The orchestration above is a <strong>deterministic decision tree written in
+Python</strong>, not an LLM-driven agent loop, and not LangChain. This is a
+deliberate design choice, not an omission &mdash; so it is worth stating
+plainly what was declined and why.</p>
+
+<p><strong>The governing principle.</strong> The LLM is confined to the
+<em>edges</em> of the system as a constrained natural-language&nbsp;&harr;
+structured-data adapter: prose in &rarr; typed parameter dict; numeric solution
+out &rarr; prose. It never decides <em>what the system does next</em>. The
+control flow &mdash; intent &rarr; classify &rarr; extract &rarr; validate
+&rarr; feasibility &rarr; solve &rarr; explain &mdash; is fixed and known at
+design time, and the actual optimisation is performed by a provably correct
+solver (Pyomo&nbsp;+&nbsp;HiGHS), not by the model. The hard, unreliable
+boundary (free text&nbsp;&rarr;&nbsp;numbers) is tamed with JSON-schema-bound
+prompts, Pydantic validation, and the 3-layer feasibility gate
+(&sect;7) &mdash; not with an agent that retries until something sticks.</p>
+
+<p><strong>What an agent framework actually buys you</strong> is two things:
+(1)&nbsp;an <em>agent-executor loop</em> where the model chooses tools and
+chains them dynamically because the right sequence cannot be enumerated ahead
+of time, and (2)&nbsp;retrieval plumbing (loaders, splitters, vector stores,
+retrievers) for RAG. Neither applies here. The tool set is a small, fixed
+registry of solvers; the right one is picked by a deterministic classifier +
+registry lookup, not chosen by the LLM in a loop. And retrieval was built,
+benchmarked, and <em>rejected on evidence</em> (RAG&nbsp;50% vs&nbsp;70%
+no-RAG; see &sect;8) &mdash; it is archived, not in the production path. A
+framework would add abstraction, indirection, and a harder-to-debug failure
+surface for capabilities the system does not use.</p>
+
+<p><strong>The precise trigger &mdash; when this decision would flip.</strong>
+The argument is <em>not</em> &ldquo;LLM output is stochastic, therefore avoid
+agents&rdquo;; token-level non-determinism is handled by schema&nbsp;+
+validation&nbsp;+ the feasibility gate. An agent loop earns its complexity when
+the <strong>LLM itself must do dynamic planning over an open-ended action
+space</strong> &mdash; specifically: the tool space is large and the correct
+sequence depends on intermediate results in ways the developer cannot
+pre-wire; the plan must be discovered at runtime; multi-hop retrieval is in
+the loop; or the task is long-horizon and self-correcting over many steps.
+This domain has none of those properties: it is bounded, the optimal control
+flow is knowable in advance, and the heavy lifting is operations research, not
+LLM orchestration. Adding more problem families or follow-up types does
+<em>not</em> cross that line &mdash; it is one more registered solver and one
+more classifier label, still a decision tree. If the tool space became
+open-ended or the plan had to be discovered per request, <em>that</em> is the
+point at which an agent-executor (LangGraph-style) loop would be the right
+tool. Until then, deterministic, code-owned orchestration is the more reliable,
+inspectable, and debuggable choice &mdash; and inspectability is itself a
+feature for a system whose outputs are business decisions.</p>
+
+<h2>3. The two-call heuristic protocol</h2>
 <p>Local LLM inference costs ~2&ndash;3 min on CPU. Rather than make the user
 stare at a spinner, <code>heuristic_then_ask</code> mode splits the work:</p>
 <ul>
@@ -159,7 +209,7 @@ what-if, which is answered against the pending job without consuming it.</li>
 automatically) &rarr; a provably-optimal answer, reached faster.</li>
 </ul>
 
-<h2>3. How the optimization is actually solved</h2>
+<h2>4. How the optimization is actually solved</h2>
 <p>Models are built with <strong>Pyomo</strong> and solved by <strong>HiGHS</strong>
 through its <code>highspy</code> wheel via Pyomo's APPSI interface &mdash; no
 external solver binary to install (this is also why Windows setup is now
@@ -183,7 +233,7 @@ sequencing, makespan objective; LPT heuristic for the warm answer).</p>
 classification/extraction run at temperature&nbsp;0, so the objective and flows
 are byte-identical on any machine; only the narration wording can vary.</p>
 
-<h2>4. The LLM layer</h2>
+<h2>5. The LLM layer</h2>
 <p>An abstract <code>LLMClient</code> hides the provider. The default is local
 Ollama with <code>qwen3:14b</code> across all stages (one warm model); a Groq
 backend is opt-in. Per-stage temperature: classification&nbsp;0 (schema-bound,
@@ -193,7 +243,7 @@ only translates prose&harr;schema and narrates the solver's output. The 3-layer
 feasibility gate is the guardrail &mdash; a hallucinated parameter fails loudly
 <em>before</em> the solver runs, instead of producing a confident wrong number.</p>
 
-<h2>5. Follow-ups &amp; what-if</h2>
+<h2>6. Follow-ups &amp; what-if</h2>
 <p>Follow-ups are classified into <em>sensitivity / what-if / resolve / pareto</em>.
 A what-if re-parses just the changed parameter, re-checks feasibility, re-solves,
 and reports the cost delta and flow changes against the baseline. An infeasible
@@ -201,7 +251,7 @@ scenario is treated as a useful answer ("that can't work, here's why, here's how
 to fix it"), not an error &mdash; and it works even while a heuristic job is still
 pending.</p>
 
-<h2>6. The 3-layer feasibility gate</h2>
+<h2>7. The 3-layer feasibility gate</h2>
 <p>Between extraction and the solver sits a deliberately ordered gate:
 <strong>cheapest, most certain checks first; the expensive solver call last
 and only if needed</strong>. Each layer can reject with plain-language reasons
@@ -241,7 +291,7 @@ structured checks catch the inconsistency <em>before</em> the solver runs
 &mdash; so the system fails loudly with a fixable explanation instead of
 producing a confident wrong number. Fail fast, fail cheap, fail actionable.</p>
 
-<h2>7. Classification &mdash; three approaches evaluated</h2>
+<h2>8. Classification &mdash; three approaches evaluated</h2>
 <p>Production uses an <strong>LLM 3-vote majority</strong> classifier. It was
 not the first or only thing tried: two alternatives were fully built and
 benchmarked first, and a third was engineered as a deterministic fallback.</p>
@@ -279,7 +329,7 @@ elaborate approaches are preserved as evidence and a deterministic fallback.
 A documented "simple baseline is hard to beat" outcome.</li>
 </ul>
 
-<h2>8. Warm-start &mdash; an honest negative result</h2>
+<h2>9. Warm-start &mdash; an honest negative result</h2>
 <p>The plan assumed a heuristic warm-start would accelerate every solve. It
 does not. Warm-start helps only small pure-LP transport; beyond ~10&times;20 it
 is <em>slower</em> than a cold solve, and on scheduling the cold and warm runs

@@ -1,6 +1,6 @@
 # schemas/requests.py
 from pydantic import BaseModel, Field
-from typing import Literal, Optional
+from typing import Any, Dict, Literal, Optional
 
 
 SolveMode = Literal["heuristic", "exact", "heuristic_then_ask"]
@@ -42,6 +42,15 @@ class ChatContinueRequest(BaseModel):
             "Parsed into one of optimize / accept / use_heuristic before dispatch."
         ),
     )
+
+
+class ExportRequest(BaseModel):
+    """Export a solved payload to .xlsx. The chat holds the full solve result
+    client-side, so it posts that back rather than re-solving by id (avoids
+    the heuristic job-store TTL entirely)."""
+    problem_type: Optional[str] = Field(default=None)
+    extracted_params: Dict[str, Any] = Field(default_factory=dict)
+    solution: Dict[str, Any] = Field(default_factory=dict)
 
 
 class FileInputRequest(BaseModel):

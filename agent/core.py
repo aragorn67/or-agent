@@ -34,6 +34,61 @@ from .heuristic_handler import (
 )
 from .job_store import default_store as default_job_store, JobStore
 
+
+# Continuation chips (Phase 2 #5). Every response that reaches the chat UI
+# carries a `next_options` list so the user can keep going with one click
+# instead of guessing the next command. Each option is one of:
+#   {"label": str, "message": str}              -> send `message` immediately
+#   {"label": str, "message": str, "fill": true}-> prefill input, let user edit
+#   {"label": str, "action": "new"}             -> reset to a fresh problem
+#   {"label": str, "action": "example", "index": int} -> load a sample problem
+def build_next_options(result: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Map a solve/follow-up payload to the natural next actions for the chat.
+
+    Pure function of the result dict — no agent state — so it can be applied
+    once at the API boundary regardless of which code path produced `result`.
+    """
+    NEW = {"label": "🆕 New problem", "action": "new"}
+    WHATIF = {"label": "🔧 What-if…", "message": "what if ", "fill": True}
+    SENS = {"label": "📊 Sensitivity…", "message": "sensitivity on ", "fill": True}
+    EXAMPLES = [
+        {"label": "💼 Example: transportation", "action": "example", "index": 0},
+        {"label": "🏭 Example: fixed-charge", "action": "example", "index": 1},
+    ]
+
+    rtype = result.get("type")
+
+    # Conversational dead-ends with nothing solved yet — offer a way in.
+    if rtype in ("analysis_no_baseline", "smalltalk", "help") or (
+        not result.get("success") and not result.get("solution")
+    ):
+        return EXAMPLES + [NEW] if rtype != "smalltalk" else EXAMPLES
+
+    # A heuristic answer is on the table and the job is still pending a
+    # decision (initial heuristic_then_ask, or a what-if answered against it).
+    pending = (
+        result.get("job_pending")
+        or result.get("available_actions")
+        or (result.get("mode") == "heuristic" and result.get("job_id"))
+    )
+    if pending:
+        return [
+            {"label": "⚡ Optimize (exact)", "message": "optimize"},
+            {"label": "✓ Accept heuristic", "message": "accept"},
+            WHATIF,
+            NEW,
+        ]
+
+    # Something is solved (exact solve, exact-after-heuristic, accepted
+    # heuristic, or a follow-up analysis) — invite further exploration.
+    if result.get("success") and (
+        result.get("solution") or rtype in ("follow_up_analysis", "heuristic_accepted")
+    ):
+        return [SENS, WHATIF, NEW]
+
+    return [NEW]
+
+
 class OptimizationAgent:
     """
     Main agent orchestrating problem solving with intelligent intent routing.

@@ -369,3 +369,56 @@ call) instead of the full pipeline + cryptic error.
 **Possible follow-up.** Early gate runs *after* `detect_intent`'s LLM
 call; moving the keyword check ahead of it would make this path fully
 LLM-free (~0s). Deferred — micro-opt on an error path, not the happy path.
+
+## 2026-05-16 — Deliverable overhaul + forgotten-subsystem audit
+
+**Doc.** `Optimization-AI_Overview` repurposed for interview/management
+reuse: removed the only Tolaros reference (footer → "system overview");
+added three Part II sections — the 3-layer feasibility gate (Structural
+→ problem-specific → LP-relaxation, with the fail-fast/fail-actionable
+rationale), Classification: three approaches evaluated, and Warm-start:
+an honest negative result. HTML edited, PDF regenerated (6 → 9 pp,
+visually verified). Part I (pp.1–2) stands alone as the exec/FYI piece
+(page-break + bridge line); no separate brief created, per user.
+
+**Audit.** "What did we miss" sweep found two substantial, dormant
+subsystems absent from memory/docs (root cause of an earlier wrong
+"no RAG" claim):
+- `ML_RAG_archive/` — real RAG (LangChain+Chroma, 20,399 chunks /
+  5,008 pp, all-MiniLM-L6-v2) + RandomForest, both benchmarked then
+  rejected: RAG 50% vs 70% no-RAG (+ extraction timeouts); ML 44% on
+  real OR vs LLM 70%. Archived 2025-11-19.
+- `or_classify/` — versioned 9-family OR taxonomy + 7 Snorkel-style
+  labeling functions + hybrid TF-IDF/LF feature pipeline; built,
+  not wired to production.
+Both captured to memory as interview material. The three-approaches
+classifier section in the doc is grounded in this audit.
+
+## Phase 2 #5 — continuation chips + chat interactivity pass (2026-05-17)
+
+**What.** Closed Phase 2 #5 and, on user request, expanded it into a
+full chat-interactivity pass (all 4 scoped options).
+
+**Design choice — single chokepoint.** `build_next_options(result)` is a
+*pure* function of the response dict (no agent state), applied once at the
+API boundary via `_with_options(...)` rather than at ~12 `core.py` return
+sites. Every path (sync `/solve`, async `/jobs`, `/continue`,
+`/chat/continue`) gets `next_options` for free; routing-state chips stay
+server-authored, while params-derived chips (quick what-ifs, Show table,
+Export) are synthesised client-side from the payload the chat already
+holds — no extra round-trips.
+
+**#6 evolved, not deferred.** Planned as `GET /jobs/{id}/export.xlsx`;
+shipped as `POST /export/xlsx` taking the client-held payload. Rationale:
+the GET-by-id form is hostage to the 10-min heuristic job-store TTL and
+breaks after an exact solve (jobId cleared). Posting the payload back is
+stateless and works in every post-solve state. Workbook = Summary +
+Flows/Schedule + Parameters; openpyxl/pandas; TestClient-verified for
+transportation and single-stage scheduling.
+
+**Validation.** 8 routing states → expected chip sets; export 200 +
+valid workbook (both domains); `api` imports clean; full suite shows no
+new reds (`test_default_config`, `test_classification` errors, and
+full-run-ordering `test_feasible_us_manufacturing` all reproduce on a
+clean tree — pre-existing, unrelated). Browser click-through still
+pending (static review only).
