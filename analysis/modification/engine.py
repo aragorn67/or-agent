@@ -45,10 +45,14 @@ def resolve_with_modification(
     )
 
     modifications = modification_result.get("modifications", [])
-    if not modifications:
+    applied_count = modification_result.get("applied_count", len(modifications))
+    if not modifications or applied_count == 0:
+        hint = ('resolve with capacity of Plant North = 100'
+                if "plants" in params
+                else "resolve with OrderC's deadline = 9")
         return {
             'success': False,
-            'message': 'Could not parse modification. Try: "resolve with capacity of Plant North = 100"'
+            'message': f'Could not apply that modification. Try: "{hint}"'
         }
 
     # Apply modifications
@@ -77,6 +81,7 @@ def resolve_with_modification(
 
     return {
         'success': True,
+        'problem_type': 'SCHEDULING' if 'orders' in params else 'TRANSPORTATION',
         'new_params': new_params,
         'new_solution': new_solution,
         'modifications': modifications,
@@ -182,10 +187,17 @@ def format_modification_results(results: Dict[str, Any]) -> str:
     cost_diff = results['cost_diff']
     cost_diff_pct = results['cost_diff_pct']
 
+    from analysis.scenarios.engine import _fmt_obj
+    pt = results.get('problem_type', '')
+    is_sched = (pt or "").upper().startswith("SINGLE_STAGE") or \
+               (pt or "").upper() == "SCHEDULING"
+    label = "makespan" if is_sched else "cost"
+    diff_str = (f"{cost_diff:+g} h" if is_sched else f"${cost_diff:+,.2f}")
+
     output.append("✓ Re-optimization successful!")
-    output.append(f"  Old cost: €{old_cost:.2f}")
-    output.append(f"  New cost: €{new_cost:.2f}")
-    output.append(f"  Difference: €{cost_diff:+.2f} ({cost_diff_pct:+.1f}%)")
+    output.append(f"  Old {label}: {_fmt_obj(old_cost, pt)}")
+    output.append(f"  New {label}: {_fmt_obj(new_cost, pt)}")
+    output.append(f"  Difference: {diff_str} ({cost_diff_pct:+.1f}%)")
 
     # Show top flows
     new_solution = results.get('new_solution', {})

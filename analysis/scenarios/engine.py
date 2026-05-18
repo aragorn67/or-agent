@@ -55,10 +55,18 @@ def perform_what_if_scenario(
     )
 
     modifications = modification_result.get("modifications", [])
-    if not modifications:
+    # applied_count tells us whether the modifications actually changed any
+    # parameter. A parsed-but-unapplied modification (e.g. a scheduling
+    # deadline the apply step couldn't map) must NOT fall through and "solve"
+    # the unchanged problem — that produced a misleading FEASIBLE verdict.
+    applied_count = modification_result.get("applied_count", len(modifications))
+    if not modifications or applied_count == 0:
+        hint = ('what if capacity of Plant North was 100'
+                if "plants" in params
+                else "what if OrderC's deadline is hour 9")
         return {
             'success': False,
-            'message': 'Could not parse modification. Try: "what if capacity of Plant North was 100"'
+            'message': f'Could not apply that modification. Try: "{hint}"'
         }
 
     # Apply modification to a deep copy
@@ -103,6 +111,7 @@ def perform_what_if_scenario(
     return {
         'success': True,
         'feasible': True,
+        'problem_type': problem_type,
         'modifications': modifications,
         'original_cost': original_cost,
         'scenario_cost': scenario_cost,
@@ -110,6 +119,18 @@ def perform_what_if_scenario(
         'cost_diff_pct': cost_diff_pct,
         'flow_changes': flow_changes
     }
+
+
+def _fmt_obj(value: float, problem_type: str) -> str:
+    """Render an objective value with the right unit.
+
+    Scheduling minimises makespan in HOURS — '€8.00' was both the wrong
+    symbol and spurious precision. Transport stays a dollar amount.
+    """
+    if (problem_type or "").upper().startswith("SINGLE_STAGE") or \
+       (problem_type or "").upper() == "SCHEDULING":
+        return f"{value:g} h"
+    return f"${value:,.2f}"
 
 
 def compare_solutions(original_solution: Dict[str, Any], scenario_solution: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -194,10 +215,16 @@ def format_scenario_results(results: Dict[str, Any]) -> str:
     cost_diff = results['cost_diff']
     cost_diff_pct = results['cost_diff_pct']
 
+    pt = results.get('problem_type', '')
+    is_sched = (pt or "").upper().startswith("SINGLE_STAGE") or \
+               (pt or "").upper() == "SCHEDULING"
+    label = "makespan" if is_sched else "cost"
+    diff_str = (f"{cost_diff:+g} h" if is_sched else f"${cost_diff:+,.2f}")
+
     output.append("✓ Scenario is FEASIBLE and OPTIMAL")
-    output.append(f"  Original cost: €{original_cost:.2f}")
-    output.append(f"  Scenario cost: €{scenario_cost:.2f}")
-    output.append(f"  Difference: €{cost_diff:+.2f} ({cost_diff_pct:+.1f}%)")
+    output.append(f"  Original {label}: {_fmt_obj(original_cost, pt)}")
+    output.append(f"  Scenario {label}: {_fmt_obj(scenario_cost, pt)}")
+    output.append(f"  Difference: {diff_str} ({cost_diff_pct:+.1f}%)")
 
     # Flow changes
     flow_changes = results.get('flow_changes', [])

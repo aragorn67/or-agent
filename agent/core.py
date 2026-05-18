@@ -145,7 +145,25 @@ class OptimizationAgent:
         try:
             # STAGE 1: Intent Detection (NEW - fixes Issue #1)
             update_progress("Detecting intent...", 5)
-            intent_result = self.intent_router.detect_intent(description, conversation_context)
+            # Micro-opt: the deterministic intent pass is LLM-free. Run it
+            # first; if it finds nothing, catch the bare keyword what-if
+            # FIRST-message case here — before the LLM intent fallback —
+            # so that whole path never touches the LLM. The later
+            # _analysis_needs_baseline guard is left intact (a harmless
+            # second check for the paths that reach it), so every
+            # non-bare-what-if path keeps its exact original behaviour.
+            intent_result = self.intent_router._check_deterministic_intent(
+                description, conversation_context
+            )
+            if intent_result is None:
+                guide = self._analysis_needs_baseline(
+                    description, conversation_context, allow_data_rich=False
+                )
+                if guide is not None:
+                    return guide
+                intent_result = self.intent_router._llm_intent_detection(
+                    description, conversation_context
+                )
             intent_type = intent_result.get("intent", "optimization")
 
             # Handle smalltalk

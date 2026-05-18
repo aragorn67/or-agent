@@ -246,7 +246,7 @@ function chipsFor(d){
   const extra = [];
   if (d.success && d.solution){
     extra.push(...quickWhatIfs(d));
-    extra.push({ label:'📋 Show table',   action:'table'  });
+    extra.push({ label:'📋 Show table again', action:'table' });
     extra.push({ label:'🔍 Explain more', message:'explain the solution in more detail' });
     extra.push({ label:'📥 Export .xlsx', action:'export' });
   }
@@ -258,21 +258,14 @@ function chipsFor(d){
 
 function showChips(d){ addChips(chipsFor(d)); }
 
-function renderTable(){
-  const s = lastPayload && lastPayload.solution;
-  if (!s){ addMsg('Nothing to tabulate yet.', 'agent'); return; }
-  let cols, rows;
-  if (s.flows && s.flows.length){
-    cols = ['plant', 'market', 'value'];
-    rows = s.flows.map(f => [f.plant, f.market, f.value]);
-  } else if (s.assignments && s.assignments.length){
-    const comp = s.completion || {};
-    cols = ['order', 'unit', 'completion'];
-    rows = s.assignments.map(a => [a.order, a.unit, comp[a.order] ?? '—']);
-  } else {
-    addMsg('No tabular flows/assignments in this solution.', 'agent');
-    return;
-  }
+// Trim float noise (solver rounds to 6dp; start = end - dur can still
+// show e.g. 3.9999996) and drop trailing zeros: 8.0 -> "8", 3.5 -> "3.5".
+function fmtNum(x){
+  if (x == null || isNaN(x)) return '—';
+  return String(Number(Number(x).toFixed(3)));
+}
+
+function buildTable(cols, rows){
   const t = document.createElement('table');
   t.className = 'dtable';
   const hr = document.createElement('tr');
@@ -283,7 +276,75 @@ function renderTable(){
     r.forEach(v => { const td = document.createElement('td');
                      td.textContent = v; tr.appendChild(td); });
     t.appendChild(tr); });
-  addMsg('Solution detail:', 'agent', [t]);
+  return t;
+}
+
+// Explanatory schedule view: reconstruct each unit's back-to-back
+// timeline (start = completion − processing time) and sort by start, so
+// the reader can actually see *what the optimal schedule is*.
+function renderSchedule(d, s){
+  const comp = s.completion || {};
+  const pt   = (d.extracted_params && d.extracted_params.processing_time) || {};
+  const rows = s.assignments.map(a => {
+    const end = comp[a.order];
+    const dur = pt[a.order] && pt[a.order][a.unit];
+    const start = (end != null && dur != null) ? end - dur : null;
+    return { unit:a.unit, order:a.order, start, end,
+             dur:(dur != null ? dur : null) };
+  });
+  rows.sort((x,y) => x.unit === y.unit
+      ? ((x.start ?? 0) - (y.start ?? 0))
+      : String(x.unit).localeCompare(String(y.unit)));
+
+  const mk = s.Cmax != null ? s.Cmax
+           : (s.objective_value != null ? s.objective_value
+              : Math.max(...rows.map(r => r.end ?? 0)));
+
+  // Per-unit one-line sequences, e.g. "Unit1: OrderA → OrderD".
+  const seq = {};
+  rows.forEach(r => { (seq[r.unit] = seq[r.unit] || []).push(r.order); });
+  const seqStr = Object.entries(seq)
+      .map(([u, os]) => `${u}: ${os.join(' → ')}`).join('   |   ');
+
+  addMsg(
+    `🗓️ Optimal schedule — last order finishes at hour ${fmtNum(mk)} `
+    + `(this makespan is what's minimised; each unit runs its orders `
+    + `back-to-back with no idle gap).\n${seqStr}`,
+    'agent',
+    [ buildTable(
+        ['Unit', 'Order', 'Start (h)', 'End (h)', 'Duration (h)'],
+        rows.map(r => [r.unit, r.order,
+                       fmtNum(r.start), fmtNum(r.end), fmtNum(r.dur)]) ) ]
+  );
+}
+
+function renderTable(){
+  const d = lastPayload;
+  const s = d && d.solution;
+  if (!s){ addMsg('Nothing to tabulate yet.', 'agent'); return; }
+  if (s.flows && s.flows.length){
+    const total = s.objective_value != null
+        ? ' — total cost ' + Number(s.objective_value).toLocaleString() : '';
+    addMsg('🚚 Optimal shipment plan' + total
+         + ' (units shipped on each plant → market route):', 'agent',
+      [ buildTable(['Plant', 'Market', 'Units shipped'],
+          s.flows.map(f => [f.plant, f.market, fmtNum(f.value)])) ]);
+  } else if (s.assignments && s.assignments.length){
+    renderSchedule(d, s);
+  } else {
+    addMsg('No tabular flows/assignments in this solution.', 'agent');
+  }
+}
+
+// Auto-render the solution detail right after a solved-result card,
+// unless we just showed it (avoids a double table when the user also
+// clicks the "Show table" chip).
+function autoRenderTable(){
+  const s = lastPayload && lastPayload.solution;
+  if (s && ((s.flows && s.flows.length) ||
+            (s.assignments && s.assignments.length))) {
+    renderTable();
+  }
 }
 
 async function doExport(){
@@ -415,6 +476,7 @@ async function send(){
           'agent');
         jobId = d.job_id;
         lastPayload = d;
+        autoRenderTable();
         showChips(d);
       }
     } else {
@@ -436,7 +498,7 @@ async function send(){
         addMsg('Still here — reply "optimize" for the exact solver, '
              + '"accept" to keep the heuristic, or ask another what-if.',
                'agent');
-        if (d.solution) lastPayload = d;
+        if (d.solution) { lastPayload = d; autoRenderTable(); }
         showChips(d);
       } else if (!d.success) {
         addMsg('❌ ' + (d.error || JSON.stringify(d)), 'agent');
@@ -456,6 +518,7 @@ async function send(){
         addMsg(d.summary || 'Done.', 'agent', [ card(rows) ]);
         jobId = null;   // problem solved; next message starts fresh
         lastPayload = d;
+        autoRenderTable();
         addMsg('✅ Solved. Press "New" or just describe another problem.',
                'agent');
         showChips(d);

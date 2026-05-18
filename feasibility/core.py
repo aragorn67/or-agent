@@ -78,9 +78,19 @@ def check_feasibility(instance) -> FeasibilityReport:
     # Layer 1: Problem-specific necessary conditions
     ok1, msg1 = problem_specific_checks(instance)
     if not ok1:
-        # Generate problem-specific suggestions
-        from .problem_specific.transport import generate_transport_suggestions
-        suggestions = generate_transport_suggestions(instance, msg1)
+        # Generate problem-specific suggestions (dispatch by problem type —
+        # was hardcoded to transport, which gave nonsensical "increase
+        # supply" advice for an infeasible schedule).
+        ptype = str(
+            getattr(instance, 'problem_type', None)
+            or (instance.get('problem_type', '') if isinstance(instance, dict) else '')
+        ).upper()
+        if "SCHEDUL" in ptype:
+            from .problem_specific.scheduling import generate_scheduling_suggestions
+            suggestions = generate_scheduling_suggestions(instance, msg1)
+        else:
+            from .problem_specific.transport import generate_transport_suggestions
+            suggestions = generate_transport_suggestions(instance, msg1)
         return FeasibilityReport(
             status=FeasStatus.INFEASIBLE,
             reasons=reasons + msg1,

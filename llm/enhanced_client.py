@@ -1,5 +1,5 @@
 # llm/enhanced_client.py
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from .client import LLMClient
 from .ollama_client import OllamaClient
 from .groq_client import GroqClient
@@ -203,12 +203,17 @@ Return JSON matching this schema:
   "modifications": [
     {
       "type": "increase|decrease|set|add|remove",
-      "entity": "entity name (e.g., Factory1, Market2, route from A to B)",
-      "parameter": "capacity|demand|cost|arc_capacity|supply",
+      "entity": "entity name (e.g., Factory1, Market2, route from A to B, OrderC, ALL)",
+      "parameter": "capacity|demand|cost|arc_capacity|supply|due_date|processing_time|eligible",
       "value": numeric value (for increase/decrease, this is the delta; for set, this is the new value)
     }
   ]
 }
+
+There are two problem families. Transportation params use plants/markets with
+capacity, demand, cost, arc_capacity, supply. Scheduling params use orders/units
+with due_date (deadline per order), processing_time (hours for an order on a
+unit), and eligible (which units an order may run on).
 
 Rules:
 - If the message looks like a complete new problem description, set is_complete_redescription=true and leave modifications empty
@@ -218,6 +223,19 @@ Rules:
 - For modifications like "add route from A to B with cost C", type="add"
 - Extract ALL modifications mentioned in the message
 - CRITICAL: For "decrease" operations, value should be POSITIVE (the magnitude of decrease), NOT negative
+
+Scheduling-specific rules:
+- A deadline / due date change uses parameter="due_date". The entity is the
+  order name (e.g. "OrderC"). "OrderC's deadline moves up to hour 9" →
+  {"type":"set","entity":"OrderC","parameter":"due_date","value":9}.
+- When a deadline applies to EVERY order ("every order must be completed
+  within 4 hours", "all orders due by hour 6"), use entity="ALL":
+  {"type":"set","entity":"ALL","parameter":"due_date","value":4}.
+- A processing-time change uses parameter="processing_time" with the entity
+  naming both order and unit, "OrderA on Unit1": "OrderA now takes 7 hours on
+  Unit1" → {"type":"set","entity":"OrderA on Unit1","parameter":"processing_time","value":7}.
+- "tighter / sooner / move up / must finish within" a deadline means a SMALLER
+  due_date number; prefer type="set" with the absolute hour when one is given.
 """
 
         layer_info = infeasibility_context.get('layer_failed', 'unknown')
@@ -259,11 +277,14 @@ Parse the user's response and return modifications."""
                     mod["value"] = abs(mod.get("value", 0))
 
             # Apply modifications to params
-            modified_params = self._apply_modifications(current_params, modifications)
+            modified_params, applied_count = self._apply_modifications(
+                current_params, modifications
+            )
 
             return {
                 "is_complete_redescription": False,
                 "modifications": modifications,  # Return the fixed modifications
+                "applied_count": applied_count,  # 0 => nothing actually changed
                 "applied_params": modified_params
             }
 
@@ -301,7 +322,7 @@ Parse the user's response and return modifications."""
         required_keys = {"orders", "units", "processing_time", "due_date"}
         return required_keys.issubset(set(params.keys()))
 
-    def _apply_modifications(self, params: Dict, modifications: List[Dict]) -> Dict:
+    def _apply_modifications(self, params: Dict, modifications: List[Dict]) -> Tuple[Dict, int]:
         """
         Apply parsed modifications to parameters.
 
@@ -310,12 +331,24 @@ Parse the user's response and return modifications."""
             modifications: List of modification dicts
 
         Returns:
-            Modified parameters (deep copy)
+            (modified params deep copy, count of modifications actually applied).
+            A zero count means nothing changed — callers must NOT treat the
+            unchanged params as a valid scenario (that was the silent
+            false-feasible bug for scheduling deadlines).
         """
         import copy
 
         # Deep copy to avoid modifying original
         modified = copy.deepcopy(params)
+        applied_count = 0
+
+        def _num(cur, new_v, kind):
+            """Apply set/increase/decrease to a scalar, clamped at 0."""
+            if kind == "increase":
+                return cur + new_v
+            if kind == "decrease":
+                return max(0, cur - new_v)
+            return new_v  # set
 
         def find_entity_fuzzy(entity: str, entity_list: list) -> str:
             """Find entity in list using fuzzy matching (case-insensitive, handles center/centre)"""
@@ -346,6 +379,7 @@ Parse the user's response and return modifications."""
             parameter = mod.get("parameter", "")
             value = mod.get("value", 0)
 
+            _before = copy.deepcopy(modified)
             try:
                 # Check if this is an arc capacity modification
                 # Entity like "arc from F1 to C" should be treated as arc_capacity
@@ -445,12 +479,46 @@ Parse the user's response and return modifications."""
                                     # Create nested structure
                                     modified[parameter][source] = {sink: value}
 
+                elif parameter in ["due_date", "deadline", "due"] and "due_date" in modified:
+                    # Scheduling deadline. Entity is an order name, or "ALL"
+                    # / "all orders" / "every order" when it applies to all.
+                    ent = entity.lower().strip()
+                    if ent in ("all", "all orders", "every order", "orders", "") \
+                            or "all order" in ent or "every order" in ent:
+                        targets = list(modified["due_date"].keys())
+                    else:
+                        m = find_entity_fuzzy(entity, list(modified["due_date"].keys()))
+                        targets = [m] if m else []
+                    for o in targets:
+                        modified["due_date"][o] = _num(
+                            modified["due_date"][o], value, mod_type
+                        )
+
+                elif parameter in ["processing_time", "proc_time", "processing"] \
+                        and "processing_time" in modified:
+                    # Entity names both order and unit: "OrderA on Unit1".
+                    orders = list(modified["processing_time"].keys())
+                    units = sorted({u for o in orders
+                                    for u in modified["processing_time"][o]})
+                    o = find_entity_fuzzy(
+                        entity, orders) or next(
+                        (x for x in orders if x.lower() in entity.lower()), None)
+                    u = find_entity_fuzzy(
+                        entity, units) or next(
+                        (x for x in units if x.lower() in entity.lower()), None)
+                    if o and u and u in modified["processing_time"].get(o, {}):
+                        modified["processing_time"][o][u] = _num(
+                            modified["processing_time"][o][u], value, mod_type
+                        )
+
             except Exception as e:
                 # If modification fails, skip it silently
                 print(f"Warning: Could not apply modification {mod}: {e}")
-                continue
 
-        return modified
+            if modified != _before:
+                applied_count += 1
+
+        return modified, applied_count
 
     def _parse_route(self, entity_str: str, sources: List[str], sinks: List[str]) -> Optional[tuple]:
         """

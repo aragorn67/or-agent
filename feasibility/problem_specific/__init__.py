@@ -8,13 +8,15 @@ Uses a registry pattern for easy expansion.
 from .transport import transport_checks
 
 
+from .scheduling import scheduling_checks
+
+
 # Registry mapping problem_type to checker function
 PROBLEM_TYPE_CHECKERS = {
     "TRANSPORTATION": transport_checks,
-    "transportation": transport_checks,  # Support both cases
-    # Future additions:
-    # "SINGLE_MACHINE_SCHEDULING": scheduling_checks,
-    # "ASSIGNMENT": assignment_checks,
+    "SCHEDULING": scheduling_checks,
+    "SINGLE_STAGE_SCHEDULING": scheduling_checks,
+    "SINGLE_MACHINE_SCHEDULING": scheduling_checks,
 }
 
 
@@ -43,8 +45,15 @@ def problem_specific_checks(instance) -> tuple[bool, list[str]]:
     if not problem_type:
         return True, ["No problem_type specified, skipping problem-specific checks"]
 
-    # Look up checker
-    checker = PROBLEM_TYPE_CHECKERS.get(problem_type)
+    # Look up checker — case-insensitive, with a substring fallback so
+    # variants like "single_stage_scheduling" still route correctly.
+    key = str(problem_type).upper()
+    checker = PROBLEM_TYPE_CHECKERS.get(key)
+    if checker is None:
+        if "TRANSPORT" in key:
+            checker = transport_checks
+        elif "SCHEDUL" in key:
+            checker = scheduling_checks
 
     if checker:
         return checker(instance)

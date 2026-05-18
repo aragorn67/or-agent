@@ -1095,3 +1095,40 @@ escalate to the user, do not reformulate.
 Both are real "remove the hard ceiling" items and are the next agentic
 direction after the deterministic backlog (Phase 3) is closed. See
 memory `project_design_thesis` for the rationale and the tripwire rule.
+
+## Update — deterministic backlog CLOSED (2026-05-18)
+
+Phases 0→3 are all done. This session:
+
+- **Model sweep acted on.** Overnight `evals/model_sweep.py` run →
+  default flipped `qwen3:14b → qwen3:8b` in `config.py` (==accuracy
+  every metric, ~2× faster, n=3 both domains). qwen2.5:7b rejected
+  (transport extraction regression); mistral/groq rows untested
+  (harness/config bugs, NOT model verdicts). Full verdict in
+  ANALYSIS.md; Overview §3 deepened + model refs synced + PDF
+  regenerated.
+- **Phase 3 #2 — xlsx fast path SHIPPED.** `POST /solve/file` +
+  `GET /solve/file/template`. Refactored the post-extract pipeline into
+  shared `OptimizationAgent.solve_with_params(...)` + `_friendly_error`
+  (NL path delegates; zero behaviour change). New
+  `agent/spreadsheet_input.py` (purpose-built input workbook contract).
+  Deterministic no-LLM summary on `explain=False`. 17 new tests green;
+  suite 169 passed (same 2+3 pre-existing baseline).
+- **Phase 3 #4 — latency profiling:** already closed by the sweep
+  harness (aggregates per-stage `stage_latency`).
+
+**Resume point — "lets continue" now picks up here:**
+1. *Loose ends (chosen next, low-risk):* (a) keyword-analysis micro-opt
+   — move the keyword `detect_analysis_type` check before
+   `detect_intent` so the bare-what-if first-message path is fully
+   LLM-free; (b) visual browser click-through of the chip UI
+   (manual ~60 s; code smoke already green; env kills live servers).
+2. *Then the agentic frontier (on-thesis):* **A2** multi-stage
+   decomposition (composer over the solver registry) or **A3**
+   autonomous infeasibility repair (reason→edit→recheck within the
+   selected model). See the "Agentic roadmap" section above + memory
+   `project_design_thesis` (tripwire: never synthesise an unregistered
+   model).
+3. Everything this session is **uncommitted** — user commits manually
+   (memory `feedback_never_commit_unprompted`); commit message drafted
+   in chat.

@@ -528,3 +528,62 @@ Endpoint TestClient-checked: solve 200 + `input=spreadsheet` +
 `skipped_stages` + `next_options` intact; malformed/empty/unsupported
 → clean 422. The 17-test suite runs in **0.81 s** — itself proof the
 lane touches no LLM (tests use a method-less dummy client).
+
+## 2026-05-18 — Scheduling parity: what-if + feasibility + demo polish
+
+**Problem.** Building the scheduling chat demo (initial → modify →
+modify → infeasible) exposed that the entire post-solve interaction
+stack was **transport-only**. Three compounding defects, surfaced in
+order by the demo:
+1. *Modification parse* — `parse_infeasibility_fix`'s schema enumerated
+   only `capacity|demand|cost|arc_capacity|supply`; qwen3:8b returned
+   zero mods for any scheduling what-if → "Could not parse".
+2. *Modification apply* — `_apply_modifications` had no scheduling
+   branch, so a *parsed* `set due_date=4` was silently dropped; the
+   scenario engine then solved the **unchanged** problem and reported
+   FEASIBLE €8 — a confidently-wrong false-feasible.
+3. *Feasibility gate* — once apply worked, the genuinely-infeasible
+   scenario had no Layer-1 scheduling checker (registry transport-only);
+   it passed the gate, hit HiGHS, and raised a raw appsi
+   "no feasible solution" exception surfaced as "Analysis failed:
+   <pyomo internals>" — still no explanation.
+
+**Solution.**
+- Prompt/schema gained `due_date|processing_time|eligible` + the
+  `entity="ALL"` convention; scheduling rules/examples added.
+- `_apply_modifications`: due_date (per-order + ALL) and
+  processing_time branches; now returns `(modified, applied_count)` via
+  before/after snapshot. Both scenario + modification engines reject
+  `applied_count == 0` instead of solving the unchanged problem.
+- New `feasibility/problem_specific/scheduling.py`: necessary condition
+  `min(processing over eligible units) ≤ due_date` + "no eligible
+  unit", plain-language reason + suggestion. Registered SCHEDULING /
+  SINGLE_STAGE / SINGLE_MACHINE with case-insensitive + substring
+  routing. `feasibility/core.py` Layer-1 suggestion gen dispatched by
+  problem type (was hardcoded transport). `SingleStageIPMSolver.solve`
+  wraps the solve → clean `INFEASIBLE` dict, never a raw exception.
+- Output: scheduling objective rendered as **makespan in hours** (not
+  `€`); solver rounds completion/Cmax to 6 dp (kills `7.999…998`
+  noise). Chat: schedule/flow table now **auto-renders after every
+  result card**; new scheduling view reconstructs each unit's
+  back-to-back timeline (Unit | Order | Start | End | Duration) with a
+  makespan header + per-unit sequence string.
+
+**Results.** Full suite **179 passed**, same 2 fails + 3 errors as the
+documented pre-existing baseline (us_manufacturing, stale `LLMConfig`
+deepseek assert, Groq-429/ML) — **zero regressions**; +10 new tests
+(`test_scheduling_modifications.py`, `test_scheduling_feasibility.py`).
+Live qwen3:8b: "OrderC's deadline moves up to hour 9" → `set OrderC=9`
+(applied=1, OrderC only); "every order within 4 hours" → `set ALL=4`
+(applied=1, all four) → gate now returns *"Order 'OrderC' needs at
+least 5 h on its fastest eligible unit, but its deadline is hour 4…"*
++ a relax-deadline suggestion. JS validated via `node --check`. New
+deliverable `Project_Demo_Sceuduling.{webm,mp4}` (gst-launch VP8→H.264,
+no ffmpeg on box; padded 1107→1106 for even-dim x264).
+
+**Diagnosis.** Every defect was the same root shape: subsystems built
+for transport with no domain dispatch, silently degrading on scheduling
+(empty parse, dropped apply, missing checker) rather than failing
+loudly. The false-feasible (#2) was the most dangerous — a wrong answer,
+not an error. Fix pattern throughout: explicit per-domain branch +
+"unhandled ⇒ surface it, never silently pass".

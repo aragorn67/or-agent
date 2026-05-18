@@ -327,8 +327,35 @@ class SingleStageIPMSolver(OptimizationSolver):
         solver.config.time_limit = time_limit
         solver.config.load_solution = True
         solver.highs_options = {"mip_rel_gap": gap_target}
-        res = solver.solve(m)
-        status = str(res.termination_condition).upper().split(".")[-1]
+        # appsi-HiGHS raises (rather than returning a status) when it can't
+        # load a solution because the model is infeasible. The feasibility
+        # gate should catch this first, but treat a raw solve failure as a
+        # clean INFEASIBLE result instead of letting the exception surface
+        # as "Analysis failed: <pyomo internals>".
+        try:
+            res = solver.solve(m)
+            status = str(res.termination_condition).upper().split(".")[-1]
+        except Exception as e:
+            msg = str(e)
+            status = ("INFEASIBLE"
+                      if "feasible solution was not found" in msg
+                      or "infeasible" in msg.lower()
+                      else "ERROR")
+            return {
+                "status": status,
+                "solver_id": self.solver_id,
+                "objective": None,
+                "objective_value": None,
+                "best_bound": None,
+                "gap": None,
+                "assignments": [],
+                "arcs": [],
+                "completion": {},
+                "Cmax": None,
+                "objective_type": objective,
+                "warm_started": warm_start_applied,
+                "message": "No feasible schedule exists for these constraints.",
+            }
 
         # If HiGHS aborted without a feasible solution, return early.
         if status not in {"OPTIMAL", "FEASIBLE", "MAXTIMELIMIT"}:
@@ -366,9 +393,15 @@ class SingleStageIPMSolver(OptimizationSolver):
                     if v is not None and v > 0.5:
                         arcs.append({"pred": str(i), "succ": str(ip), "unit": str(j)})
 
-        completion = {str(i): float(value(m.C[i])) for i in I}
-        cmax = float(value(m.Cmax))
-        obj_val = float(value(m.OBJ))
+        # Continuous vars carry solver float noise (e.g. 7.999999999998).
+        # Round to 6 dp so completion times / makespan read cleanly
+        # everywhere downstream (chat table, xlsx, narration).
+        def _clean(x: float) -> float:
+            return round(float(x), 6)
+
+        completion = {str(i): _clean(value(m.C[i])) for i in I}
+        cmax = _clean(value(m.Cmax))
+        obj_val = _clean(value(m.OBJ))
         best_bound = (
             float(res.best_objective_bound)
             if res.best_objective_bound is not None else None
