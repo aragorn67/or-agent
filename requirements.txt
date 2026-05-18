@@ -1,6 +1,9 @@
 fastapi
 uvicorn
 pydantic
+python-multipart   # multipart UploadFile for POST /solve/file (xlsx fast path)
+pandas             # xlsx import/export (was already load-bearing for /export/xlsx)
+openpyxl           # xlsx engine for pandas
 pyomo
 highspy
 matplotlib

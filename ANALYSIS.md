@@ -490,3 +490,41 @@ Scheduling was fine but transport is disqualifying.
   inference, not an API reject) → output-format/parse mismatch with the
   classifier, same family of footgun as the qwen3/Groq-Llama JSON
   issues. Inconclusive re: mistral's actual capability.
+
+## Phase 3 #2 — xlsx structured-input fast path (2026-05-18)
+
+The "instant demo lane": `POST /solve/file` takes a structured `.xlsx`
+and skips **both** qwen3 calls (classify + extract); with
+`explain=false` (default) it also skips the third (narration) — solve
+goes from ~80–95 s (qwen3:8b) to **sub-second**.
+
+**Refactor (no behaviour change).** Factored the post-extraction tail
+of `solve_natural_language` (validate → 3-layer feasibility → mode
+routing → solve → explain → assemble) into a reusable
+`OptimizationAgent.solve_with_params(...)`, plus a shared
+`_friendly_error`. The NL path calls it after classify+extract; the
+file path calls it directly. One source of truth for the feasibility
+gate / heuristic routing / `next_options`. Full suite: **169 passed**
+(incl. 17 new), the 2 fails + 3 errors are the documented pre-existing
+baseline (`test_feasible_us_manufacturing`, the legacy
+`LLMConfig.model=='deepseek-r1:latest'` stale assert — *not* the
+qwen3:8b change, it's a different config object — and the Groq-429 / ML
+classification errors). Refactor introduced **zero** regressions.
+
+**Input contract.** A purpose-built input workbook, deliberately NOT
+the `/export/xlsx` shape (its `Parameters` sheet is `str(v)`-lossy,
+`Flows` is output). Transport: `Supply`/`Demand`/`Cost` (+ optional
+`FixedCost`→MIP / `ArcCapacity`); Scheduling: `Processing` (blank cell
+= not eligible) / `DueDate`. Parser targets the *extractor's* output
+shape (`cost` nested map, etc.), not the solver's alternate
+`distance`+`freight` form — verified by feeding it through the real
+feasibility gate. Every malformed input is a `ValueError` → HTTP 422,
+never a 500. `GET /solve/file/template?problem_type=…` serves a
+correctly-shaped blank workbook.
+
+**Verified.** Both domains round-trip template→parse→solve to OPTIMAL
+(transport = $153,675, the EX0 baseline; scheduling Cmax 3.5).
+Endpoint TestClient-checked: solve 200 + `input=spreadsheet` +
+`skipped_stages` + `next_options` intact; malformed/empty/unsupported
+→ clean 422. The 17-test suite runs in **0.81 s** — itself proof the
+lane touches no LLM (tests use a method-less dummy client).

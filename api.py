@@ -12,9 +12,10 @@ import io
 import threading
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import HTMLResponse, StreamingResponse
 
+from agent import spreadsheet_input as sheet_input
 from agent.core import OptimizationAgent, build_next_options
 from agent.progress_store import ProgressStore
 from config import config
@@ -205,6 +206,66 @@ def export_xlsx(req: ExportRequest):
         ),
         headers={"Content-Disposition": f'attachment; filename="{fname}"'},
     )
+
+
+@app.get("/solve/file/template")
+def solve_file_template(problem_type: str = Query(...)):
+    """Download a blank, correctly-shaped input workbook for a domain so
+    the user can see the exact sheet layout the fast path expects."""
+    try:
+        data = sheet_input.build_template(problem_type)
+        dom = sheet_input.domain_of(problem_type)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    fname = f"{dom}_input_template.xlsx"
+    return StreamingResponse(
+        io.BytesIO(data),
+        media_type=(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        ),
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
+
+
+@app.post("/solve/file")
+async def solve_file(
+    problem_type: str = Form(...),
+    mode: str = Form("exact"),
+    explain: bool = Form(False),
+    file: UploadFile = File(...),
+):
+    """Phase 3 #2: structured .xlsx upload -> solve, skipping BOTH qwen3
+    calls (classify + extract). The "instant demo lane".
+
+    The spreadsheet supplies params directly; everything after
+    (validate -> feasibility -> mode-route -> solve) is the exact shared
+    pipeline the NL path uses. ``explain=False`` (default) also skips the
+    third qwen3 call, using a deterministic summary instead.
+    """
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(status_code=422, detail="Uploaded file is empty.")
+    try:
+        params = sheet_input.parse_workbook(io.BytesIO(raw), problem_type)
+        resolved_type, solver_id = sheet_input.resolved_ids(problem_type)
+    except ValueError as exc:
+        # Malformed workbook / unsupported domain — never a 500.
+        raise HTTPException(status_code=422, detail=str(exc))
+
+    result = agent.solve_with_params(
+        params=params,
+        problem_type=resolved_type,
+        solver_id=solver_id,
+        description=f"Structured spreadsheet input ({file.filename})",
+        mode=mode,
+        explain=explain,
+    )
+    result["input"] = "spreadsheet"
+    result["skipped_stages"] = (
+        ["classify", "extract", "explain"] if not explain
+        else ["classify", "extract"]
+    )
+    return _with_options(result)
 
 
 @app.post("/agent/classify")

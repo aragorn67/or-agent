@@ -254,9 +254,64 @@ class OptimizationAgent:
                     "suggestion": "Please provide complete information including all factory names, capacities, customer names, demands, and distances between all factories and customers."
                 }
 
-            update_progress("Validating parameters...", 55)
+            # Steps 4-7 (validate -> feasibility -> mode-route -> solve ->
+            # explain -> assemble) are shared with the xlsx fast path.
+            return self.solve_with_params(
+                params=params,
+                problem_type=problem_type,
+                solver_id=solver_id,
+                description=description,
+                mode=mode,
+                classification=classification,
+                conversation_context=conversation_context,
+                progress_callback=progress_callback,
+                explain=True,
+            )
 
-            # Step 4: Validate parameters
+        except Exception as e:
+            return self._friendly_error(str(e))
+
+    def solve_with_params(
+        self,
+        *,
+        params: Dict[str, Any],
+        problem_type: str,
+        solver_id: str,
+        description: str,
+        mode: str = "exact",
+        classification: Optional[Dict[str, Any]] = None,
+        conversation_context: Optional[Dict] = None,
+        progress_callback=None,
+        explain: bool = True,
+    ) -> Dict[str, Any]:
+        """Shared solve tail used by both the NL pipeline and the
+        structured-input (xlsx) fast path.
+
+        Runs validate -> 3-layer feasibility -> mode routing
+        (heuristic/exact) -> solve -> explanation, then assembles the
+        standard result payload. The natural-language path calls this
+        after classify+extract; the spreadsheet fast path calls it
+        directly, skipping both qwen3 calls.
+
+        When ``explain`` is False the LLM narration step is skipped and a
+        deterministic templated summary is used instead — this keeps the
+        xlsx lane ~instant (no third qwen3 call).
+        """
+        classification = classification or {
+            "type": problem_type, "solver_id": solver_id, "confidence": 1.0,
+        }
+        confidence = classification.get("confidence", 1.0)
+        if conversation_context is None:
+            conversation_context = self.conversation_context
+
+        def update_progress(step: str, progress: int):
+            if progress_callback:
+                progress_callback(step, progress)
+
+        try:
+            solver = get_solver(solver_id)
+
+            update_progress("Validating parameters...", 55)
             validation_errors = solver.validate_params(params)
             if validation_errors:
                 return {
@@ -264,38 +319,31 @@ class OptimizationAgent:
                     "error": "Parameter validation failed",
                     "details": validation_errors,
                     "problem_type": problem_type,
-                    "confidence": confidence
+                    "confidence": confidence,
                 }
 
             update_progress("Checking feasibility...", 60)
-
-            # Step 4.5: Check feasibility (NEW - 3-layer validation)
             from feasibility.core import check_feasibility, FeasStatus
             from feasibility.schemas import ParsedInstance
 
-            # Convert params to instance format for feasibility checking
             instance = ParsedInstance(
                 problem_type=problem_type,
                 solver_id=solver_id,
                 sets=self._extract_sets_from_params(params),
-                params=self._convert_params_for_feasibility(params)
+                params=self._convert_params_for_feasibility(params),
             )
-
             feas_report = check_feasibility(instance)
 
             if feas_report.status == FeasStatus.INFEASIBLE:
-                # Store infeasibility info in conversation context
                 conversation_context["last_infeasibility"] = {
                     "params": params,
-                    "original_params": params.copy(),  # Store original
+                    "original_params": params.copy(),
                     "report": feas_report,
                     "retry_count": 0,
                     "problem_type": problem_type,
                     "solver_id": solver_id,
-                    "description": description
+                    "description": description,
                 }
-
-                # Return infeasibility to user with suggestions
                 return {
                     "success": False,
                     "status": "infeasible",
@@ -303,14 +351,14 @@ class OptimizationAgent:
                     "reasons": feas_report.reasons,
                     "suggestions": feas_report.suggestions or [],
                     "problem_type": problem_type,
-                    "extracted_params": params,  # Include params so modifications can be applied
+                    "extracted_params": params,
                     "retry_count": 0,
                     "max_retries": 3,
-                    "message": "The problem is infeasible. Please provide modifications to fix it, or provide a complete new problem description."
+                    "message": "The problem is infeasible. Please provide modifications to fix it, or provide a complete new problem description.",
                 }
 
-            # Step 4.6: Mode routing — heuristic modes short-circuit the exact
-            # solve and persist the job so /continue can warm-start later.
+            # Mode routing — heuristic modes short-circuit the exact solve
+            # and persist the job so /continue can warm-start later.
             if mode in ("heuristic", "heuristic_then_ask"):
                 if heuristic_mode_supported(problem_type):
                     update_progress("Running heuristic...", 70)
@@ -331,30 +379,33 @@ class OptimizationAgent:
                 # Heuristic unsupported for this domain — fall through to exact.
 
             update_progress("Solving optimization problem...", 70)
-
-            # Step 5: Solve the problem
             solution = solver.solve(params)
 
-            update_progress("Generating explanation...", 85)
-
-            # Step 6: Generate explanation with original description for unit context
-            # New: explain_solution returns a dict with summary, explanation, units_info
-            explanation_result = self.llm.explain_solution(solution, problem_type, description)
-            explanation = explanation_result.get('explanation', '')
-            summary = explanation_result.get('summary', '')
+            if explain:
+                update_progress("Generating explanation...", 85)
+                explanation_result = self.llm.explain_solution(
+                    solution, problem_type, description
+                )
+            else:
+                # xlsx fast lane: no third qwen3 call — deterministic summary.
+                explanation_result = self._deterministic_summary(
+                    solution, problem_type
+                )
+            explanation = explanation_result.get("explanation", "")
+            summary = explanation_result.get("summary", "")
 
             update_progress("Checking for analysis requests...", 90)
-
-            # Step 7: Check if user wants additional analysis/plots
-            analysis_requests = self.analysis_detector.detect_analysis_requests(description)
-
+            analysis_requests = self.analysis_detector.detect_analysis_requests(
+                description
+            )
             analysis_results = []
             if analysis_requests.get("wants_analysis", False):
                 update_progress("Performing additional analysis...", 95)
-                analysis_results = self._perform_requested_analyses(analysis_requests, params)
+                analysis_results = self._perform_requested_analyses(
+                    analysis_requests, params
+                )
 
             update_progress("Complete!", 100)
-
             result = {
                 "success": True,
                 "problem_type": problem_type,
@@ -363,62 +414,92 @@ class OptimizationAgent:
                 "solution": solution,
                 "explanation": explanation,
                 "summary": summary,
-                "units_info": explanation_result.get('units_info', {}),
-                "grounding_check": explanation_result.get('grounding_check', 'unknown')
+                "units_info": explanation_result.get("units_info", {}),
+                "grounding_check": explanation_result.get(
+                    "grounding_check", "unknown"
+                ),
             }
-
-            # Add analysis results if any
             if analysis_results:
                 result["analysis"] = analysis_results
-
-            # Store in conversation context for follow-ups
             conversation_context["last_solution"] = result
-
             return result
 
-        except Exception as e:
-            error_msg = str(e)
+        except Exception as e:  # noqa: BLE001 — surface any failure
+            return self._friendly_error(str(e))
 
-            # Provide user-friendly explanations for common technical errors
-            if "float() argument must be a string or a real number, not 'NoneType'" in error_msg:
-                return {
-                    "success": False,
-                    "error": "🤔 I found some missing or invalid numbers in your problem description.",
-                    "details": [
-                        "Some capacities, demands, distances, or costs couldn't be understood",
-                        "Please make sure all numbers are clearly specified",
-                        "Example: 'Factory Seattle can produce 350 units' (not just 'Factory Seattle')"
-                    ],
-                    "suggestion": "Try rephrasing with complete information for all factories, customers, capacities, demands, distances, and shipping costs.",
-                    "problem_type": "UNKNOWN",
-                    "confidence": 0.0
-                }
-            elif "No module named" in error_msg:
-                return {
-                    "success": False,
-                    "error": "⚙️ System configuration issue - missing required software component.",
-                    "details": [error_msg],
-                    "problem_type": "UNKNOWN",
-                    "confidence": 0.0
-                }
-            elif "Solver" in error_msg and "not found" in error_msg:
-                return {
-                    "success": False,
-                    "error": "⚙️ Optimization solver not available.",
-                    "details": ["The mathematical solver (GLPK) might not be properly installed"],
-                    "suggestion": "Please ensure GLPK is installed: sudo apt install glpk-utils",
-                    "problem_type": "UNKNOWN",
-                    "confidence": 0.0
-                }
-            else:
-                return {
-                    "success": False,
-                    "error": f"🔧 Unexpected error: {error_msg}",
-                    "details": ["This might be a system issue or an unusual problem format"],
-                    "suggestion": "Please try rephrasing your problem or contact support if this persists.",
-                    "problem_type": "UNKNOWN",
-                    "confidence": 0.0
-                }
+    def _deterministic_summary(
+        self, solution: Dict[str, Any], problem_type: str
+    ) -> Dict[str, Any]:
+        """Templated, no-LLM summary for the structured-input fast path.
+
+        Built straight from the solver's output so the xlsx lane needs
+        zero qwen3 calls. Mirrors the keys ``explain_solution`` returns.
+        """
+        status = solution.get("status", "—")
+        obj = solution.get("objective_value", solution.get("objective"))
+        obj_str = f"{obj:,.2f}" if isinstance(obj, (int, float)) else str(obj)
+        bits = [f"{problem_type} solved (status: {status})."]
+        if obj is not None:
+            bits.append(f"Objective value: {obj_str}.")
+        gap = solution.get("gap")
+        if isinstance(gap, (int, float)) and gap > 1e-9:
+            bits.append(f"Optimality gap: {gap * 100:.2f}%.")
+        nflows = len(solution.get("flows") or [])
+        nassign = len(solution.get("assignments") or [])
+        if nflows:
+            bits.append(f"{nflows} shipment route(s) in the plan.")
+        if nassign:
+            bits.append(f"{nassign} order(s) assigned.")
+        text = " ".join(bits)
+        return {
+            "summary": text,
+            "explanation": text + " (Deterministic summary — structured "
+            "spreadsheet input bypassed the LLM narration step.)",
+            "units_info": {},
+            "grounding_check": "skipped_structured_input",
+        }
+
+    def _friendly_error(self, error_msg: str) -> Dict[str, Any]:
+        """Map a raw exception message to a user-friendly failure dict.
+        Shared by the NL pipeline and the structured-input fast path."""
+        if "float() argument must be a string or a real number, not 'NoneType'" in error_msg:
+            return {
+                "success": False,
+                "error": "🤔 I found some missing or invalid numbers in your problem description.",
+                "details": [
+                    "Some capacities, demands, distances, or costs couldn't be understood",
+                    "Please make sure all numbers are clearly specified",
+                    "Example: 'Factory Seattle can produce 350 units' (not just 'Factory Seattle')",
+                ],
+                "suggestion": "Try rephrasing with complete information for all factories, customers, capacities, demands, distances, and shipping costs.",
+                "problem_type": "UNKNOWN",
+                "confidence": 0.0,
+            }
+        if "No module named" in error_msg:
+            return {
+                "success": False,
+                "error": "⚙️ System configuration issue - missing required software component.",
+                "details": [error_msg],
+                "problem_type": "UNKNOWN",
+                "confidence": 0.0,
+            }
+        if "Solver" in error_msg and "not found" in error_msg:
+            return {
+                "success": False,
+                "error": "⚙️ Optimization solver not available.",
+                "details": ["The mathematical solver (GLPK) might not be properly installed"],
+                "suggestion": "Please ensure GLPK is installed: sudo apt install glpk-utils",
+                "problem_type": "UNKNOWN",
+                "confidence": 0.0,
+            }
+        return {
+            "success": False,
+            "error": f"🔧 Unexpected error: {error_msg}",
+            "details": ["This might be a system issue or an unusual problem format"],
+            "suggestion": "Please try rephrasing your problem or contact support if this persists.",
+            "problem_type": "UNKNOWN",
+            "confidence": 0.0,
+        }
 
     def continue_job(self, job_id: str, action: str) -> Dict[str, Any]:
         """
