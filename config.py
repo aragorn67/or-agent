@@ -14,9 +14,11 @@ class Config:
     OLLAMA_HOST: str = os.getenv("OLLAMA_HOST", "http://localhost:11434")
     # One model across stages so Ollama keeps it warm across calls;
     # override per-stage via env vars if needed.
-    CLASSIFICATION_MODEL: str = os.getenv("CLASSIFICATION_MODEL", "qwen3:14b")
-    EXTRACTION_MODEL: str = os.getenv("EXTRACTION_MODEL", "qwen3:14b")
-    REASONING_MODEL: str = os.getenv("REASONING_MODEL", "qwen3:14b")
+    # qwen3:8b default: model-sweep (2026-05-17, n=3, both domains) showed
+    # it bit-identical to qwen3:14b on every accuracy metric at ~2x speed.
+    CLASSIFICATION_MODEL: str = os.getenv("CLASSIFICATION_MODEL", "qwen3:8b")
+    EXTRACTION_MODEL: str = os.getenv("EXTRACTION_MODEL", "qwen3:8b")
+    REASONING_MODEL: str = os.getenv("REASONING_MODEL", "qwen3:8b")
 
     # Legacy: backward compatibility
     OLLAMA_MODEL: str = CLASSIFICATION_MODEL

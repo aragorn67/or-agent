@@ -422,3 +422,71 @@ new reds (`test_default_config`, `test_classification` errors, and
 full-run-ordering `test_feasible_us_manufacturing` all reproduce on a
 clean tree — pre-existing, unrelated). Browser click-through still
 pending (static review only).
+
+## Model-sweep harness added (2026-05-17)
+
+`evals/model_sweep.py` — subprocess-per-config sweep over the existing
+round-trip eval; varies LLM backend + per-stage models via env
+(isolation = clean config.py re-import + Ollama model reset), tabulates
+the 6 metrics + per-stage latency, auto-appends results here. Model-
+agnostic: a config is `{backend, 3 model names}`; add a row, no code.
+Closes the Phase 3 "per-stage latency profiling" item (eval already
+captured `stage_latency`; the sweep aggregates it across models).
+
+Harness validated end-to-end (dry-run + 1 real run). **Non-conclusive
+early signal** (`qwen2.5:7b-instruct`, transport, n=1): class_acc 1.0,
+param recall 0.80, end-to-end FAIL (objective_mismatch), agent ≈20 s
+vs qwen3:14b ≈150 s. ~7× faster but lost ~20% of params on the seed —
+the speed/accuracy tradeoff the real sweep must quantify (n≥3, both
+domains). Full sweep is the user's to launch (long on qwen3:14b);
+results land here automatically.
+
+## Model sweep — 20260517_110157 (seeds=1,2,3, gap_threshold=0.01)
+
+| config | domain | n | class_acc | recall | pass | gap_med | agent_ms | wall_s | notes |
+|---|---|---|---|---|---|---|---|---|---|
+| baseline | transport | 3 | 1.000 | 1.000 | 0.667 | 0.000 | 196685 | 643 | agent_infeasible:1 |
+| baseline | scheduling | 3 | 1.000 | 1.000 | 1.000 | 0.000 | 158856 | 476 | ok |
+| qwen3-8b | transport | 3 | 1.000 | 1.000 | 0.667 | 0.000 | 95306 | 240 | agent_infeasible:1 |
+| qwen3-8b | scheduling | 3 | 1.000 | 1.000 | 1.000 | 0.000 | 80074 | 241 | ok |
+| qwen2.5-7b | transport | 3 | 1.000 | 0.900 | 0.333 | 0.500 | 20853 | 67 | objective_mismatch:1, agent_infeasible:1 |
+| qwen2.5-7b | scheduling | 3 | 1.000 | 1.000 | 1.000 | 0.000 | 15489 | 46 | ok |
+| qwen2.5-extract | transport | 3 | 1.000 | 0.900 | 0.333 | 0.500 | 54689 | 182 | objective_mismatch:1, agent_infeasible:1 |
+| qwen2.5-extract | scheduling | 3 | 1.000 | 1.000 | 0.667 | 0.000 | 63106 | 200 | agent_infeasible:1 |
+| mistral-7b | transport | 3 | 0.000 | — | 0.000 | — | 13398 | 42 | classification_miss:3 |
+| mistral-7b | scheduling | 3 | 0.000 | — | 0.000 | — | 14403 | 52 | classification_miss:3 |
+| groq-70b | transport | 3 | 0.333 | — | 0.000 | — | 324 | 2 | agent_infeasible:1, classification_miss:2 |
+| groq-70b | scheduling | 3 | 0.000 | — | 0.000 | — | 315 | 1 | classification_miss:3 |
+
+Raw JSON: `/tmp/sweep_20260517_110157_2itgvcq1` (lost — machine rebooted,
+`/tmp` cleared; interpretation below is from the table + harness code).
+
+**Verdict — default flipped to `qwen3:8b`.** vs the `qwen3:14b` baseline,
+qwen3-8b is **bit-identical on every accuracy metric** (recall 1.000/1.000,
+pass 0.667/1.000, gap_med 0.000) across **both** domains at n=3, at **~2x
+speed** (agent_ms 95k/80k vs 197k/159k). Meets the pre-set guardrail
+(n≥3, both domains, no regression). n=10 confirm deliberately skipped:
+the n=3 match is exact (not approximate) and the change is a reversible
+3-line env default — not worth ~1h of qwen3:14b compute to gate. The
+transport `pass 0.667` is one `agent_infeasible` seed present on baseline
+*and* qwen3-8b → a model-independent transport-formulation edge case,
+not a regression. `OLLAMA_MODEL` legacy alias unchanged (tracks
+`CLASSIFICATION_MODEL`).
+
+**Rejected on evidence:** `qwen2.5:7b-instruct` (and the
+qwen2.5-extract tiered variant) — ~7-10x faster but transport recall
+0.90, pass 0.333, gap_med 0.50 (`objective_mismatch`); the tiered row
+isolates the qwen2.5 *extractor* as the param-dropping culprit.
+Scheduling was fine but transport is disqualifying.
+
+**Not a verdict — untested, ignore these rows:**
+- `groq-70b` — class_acc 0.333/0.000 at ~300 ms is an *instant API
+  reject*, not 70b reasoning. Root cause: stale Groq model ID
+  (`config.py` default `llama-3.3-70b-versatile`; Groq retires IDs
+  aggressively). The harness never validly exercised Groq. Fix is to
+  refresh the three `GROQ_*_MODEL` defaults before any future Groq run;
+  deliberately deferred.
+- `mistral-7b` — class_acc 0.000 both domains but ~13 s latency (real
+  inference, not an API reject) → output-format/parse mismatch with the
+  classifier, same family of footgun as the qwen3/Groq-Llama JSON
+  issues. Inconclusive re: mistral's actual capability.

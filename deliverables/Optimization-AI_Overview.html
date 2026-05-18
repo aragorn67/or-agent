@@ -89,7 +89,7 @@ extraction fails loudly instead of producing a confident wrong answer.</p>
 <li>Transportation (LP) &amp; fixed-charge (MIP) &mdash; exact, verified against textbook optima</li>
 <li>Single-stage scheduling</li>
 <li>Deterministic numeric output (same answer every run, any machine)</li>
-<li>Runs fully local &amp; private (Ollama / qwen3:14b) &mdash; no data leaves the box</li>
+<li>Runs fully local &amp; private (Ollama / qwen3:8b) &mdash; no data leaves the box</li>
 <li>Round-trip eval harness: 3/3 pass, recall 1.0</li>
 <li>Classifier choice validated against ML, RAG &amp; taxonomy baselines &mdash; three approaches built and benchmarked, simplest won on evidence (&sect;8)</li>
 </ul>
@@ -195,8 +195,7 @@ feature for a system whose outputs are business decisions.</p>
 <p>Local LLM inference costs ~2&ndash;3 min on CPU. Rather than make the user
 stare at a spinner, <code>heuristic_then_ask</code> mode splits the work:</p>
 <ul>
-<li><strong>Call&nbsp;1:</strong> a fast constructive heuristic (Vogel's
-Approximation for transport, Longest-Processing-Time for scheduling) returns a
+<li><strong>Call&nbsp;1:</strong> a fast constructive heuristic returns a
 feasible answer immediately, together with an <em>LP-relaxation lower bound</em>
 &rarr; an honest "this is at most X% above optimal" gap. The job is persisted in
 an in-memory store (10-minute TTL).</li>
@@ -204,10 +203,52 @@ an in-memory store (10-minute TTL).</li>
 <code>accept</code> / <code>use heuristic</code> &mdash; or just asks a free-text
 what-if, which is answered against the pending job without consuming it.</li>
 <li><strong>Call&nbsp;2 (optimize):</strong> the exact solver runs
-<em>warm-started</em> from the heuristic's solution (Pyomo
-<code>var.value=&hellip;</code> before solve; APPSI-HiGHS picks it up
-automatically) &rarr; a provably-optimal answer, reached faster.</li>
+<em>warm-started</em> from the heuristic's solution &rarr; a provably-optimal
+answer, reached faster.</li>
 </ul>
+
+<h3>How the constructive heuristic works</h3>
+<p><strong>Transport &mdash; Vogel's Approximation (VAM).</strong> For every
+unsatisfied row and column it computes a <em>penalty</em> = the difference
+between the two cheapest available arcs in that line (the regret of <em>not</em>
+using the cheapest one). It picks the line with the largest penalty, ships as
+much as possible through that line's lowest-cost cell, removes the now-exhausted
+supply or demand, and repeats. This regret-greedy rule lands far closer to the
+optimum than a naive least-cost fill, in <em>O(n&sup2;)</em> with no solver.</p>
+<p><strong>Scheduling &mdash; Longest-Processing-Time (LPT).</strong> Jobs are
+sorted by descending processing time and each is placed on the machine that is
+currently free earliest. Front-loading the long jobs is the classic
+<em>(4/3&nbsp;&minus;&nbsp;1/3m)</em>-approximation for makespan and yields the
+assignment&nbsp;+ sequence&nbsp;+ completion times used as the warm start.</p>
+<p><strong>The fixed-charge correction (a real subtlety).</strong> VAM
+optimises variable cost only &mdash; it is blind to the per-route fixed charge
+<code>f_ij</code>. If we reported only its variable cost, the heuristic would
+look <em>cheaper</em> than the LP bound and the gap would go nonsensically
+negative. So the reported cost is <code>vam.cost</code> <strong>plus one
+<code>f_ij</code> for every route VAM actually opens</strong>, making the
+heuristic&ndash;vs&ndash;bound comparison sound.</p>
+
+<h3>Where the &ldquo;X% above optimal&rdquo; number comes from</h3>
+<p>The same MIP is solved once with the binaries relaxed
+(<code>y_ij&isin;[0,1]</code>) &mdash; an LP, fast, and a <em>true lower
+bound</em> on the integer optimum. The honest gap is then
+<code>(heuristic_cost &minus; lp_bound) / heuristic_cost</code>. If it is
+&asymp;&nbsp;0 the heuristic already matches the bound &rarr; reported as
+<em>provably optimal</em> and the exact solve is skipped entirely. Scheduling
+has no LP bound wired yet, so it honestly reports the makespan with no gap
+claim rather than a fabricated one.</p>
+
+<h3>How the warm start is actually injected</h3>
+<p>Call&nbsp;1 persists a <code>JobRecord</code> = extracted params&nbsp;+ the
+heuristic flows/assignment&nbsp;+ the LP bound (10-min TTL). On
+<code>optimize</code> the exact solver is called with
+<code>warm_start=record.heuristic_flows</code>: each Pyomo decision variable is
+seeded via <code>var.value=&hellip;</code> <em>before</em> solve, and HiGHS
+through Pyomo's APPSI interface consumes that as a MIP start &mdash; it begins
+branch&amp;bound from a known-feasible incumbent instead of from scratch.
+<code>accept</code> / <code>use&nbsp;heuristic</code> short-circuit with no
+second solve at all; a what-if question is evaluated against the still-pending
+job without consuming it.</p>
 
 <h2>4. How the optimization is actually solved</h2>
 <p>Models are built with <strong>Pyomo</strong> and solved by <strong>HiGHS</strong>
@@ -235,9 +276,13 @@ are byte-identical on any machine; only the narration wording can vary.</p>
 
 <h2>5. The LLM layer</h2>
 <p>An abstract <code>LLMClient</code> hides the provider. The default is local
-Ollama with <code>qwen3:14b</code> across all stages (one warm model); a Groq
-backend is opt-in. Per-stage temperature: classification&nbsp;0 (schema-bound,
-voted), extraction&nbsp;0, explanation&nbsp;0.1&ndash;0.3 (wording only).</p>
+Ollama with <code>qwen3:8b</code> across all stages (one warm model); a Groq
+backend is opt-in. The model was chosen by an evidence-driven sweep
+(<code>evals/model_sweep.py</code>): <code>qwen3:8b</code> matched the larger
+<code>qwen3:14b</code> on every accuracy metric across both domains at roughly
+<strong>twice the speed</strong>, so it became the default. Per-stage
+temperature: classification&nbsp;0 (schema-bound, voted), extraction&nbsp;0,
+explanation&nbsp;0.1&ndash;0.3 (wording only).</p>
 <p>The key design rule: <strong>the LLM never computes the optimum.</strong> It
 only translates prose&harr;schema and narrates the solver's output. The 3-layer
 feasibility gate is the guardrail &mdash; a hallucinated parameter fails loudly
@@ -351,7 +396,7 @@ volume; <code>M_ij = min(capacity_i, demand_j)</code> is taken as a valid tight 
 <li>The fast feasibility checks assume standard supply/demand structure; the
 LP-relaxation layer is the backstop for anything they miss.</li>
 <li>Scheduling is single-stage.</li>
-<li>Reproducibility assumes the same model (<code>qwen3:14b</code>) and solver
+<li>Reproducibility assumes the same model (<code>qwen3:8b</code>) and solver
 (HiGHS); explanation prose may differ run to run.</li>
 <li>Single-process, in-memory job store with a 10-minute TTL &mdash; not yet
 horizontally scaled.</li>
