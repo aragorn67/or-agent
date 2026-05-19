@@ -50,6 +50,13 @@ not synthesise. (memory: `project_design_thesis`)
   Curated machine-checkable infeasible corpus (both domains × Layers
   0/1/2); README *Baseline vs. system* + *Failure analysis*; Overview §7
   rewritten + PDF regenerated. (ANALYSIS 2026-05-19.)
+- **Chat round-trip stress harness** (`tests/test_chat_roundtrip.py`):
+  deterministic golden-envelope net over the real chat endpoints
+  (`/jobs`→poll→`/chat/continue`), LLM stubbed, 9 branches incl. the
+  transport-only-degradation guard. Plus a **routing matrix** (29
+  phrasings over the two keyword routers) that catalogued LLM-escalation
+  rate → decided *not* to add a second model (misses are keyword-coverage
+  gaps, not reasoning gaps). (ANALYSIS 2026-05-19.)
 
 ---
 
@@ -63,16 +70,7 @@ LP-MIP and the scheduling IPM in one place — an Overview-PDF expansion
 gate). Items A (curated infeasible corpus) and B (Baseline-vs-system +
 Failure-analysis surfacing) of this checklist are DONE (see Shipped).
 
-### 2. UI-chat stress harness 🟠
-
-Scripted `TestClient` sequence + golden outputs driving the chat
-round-trip across *every* branch — smalltalk, help, classify
-(transport/scheduling), what-if (delta + ALL), infeasible, follow-up,
-malformed. The chat path only has piecemeal coverage; this is the
-regression net for exactly the transport-only-silent-degradation class the
-scheduling-parity work just fixed.
-
-### 3. Agentic frontier — on-thesis only 🟠
+### 2. Agentic frontier — on-thesis only 🟠
 
 Both are real "remove the hard ceiling" items; both stay inside the
 validated-model envelope.
@@ -88,7 +86,7 @@ validated-model envelope.
   toggleable constraints of the already-selected model*. Tripwire: repair
   needing a structurally different model → escalate, don't reformulate.
 
-### 4. Eval hardening
+### 3. Eval hardening
 
 - **Phase 3 — metamorphic transforms:** double all costs → objective
   doubles; permute plant order → objective unchanged; add unused plant →
@@ -101,8 +99,16 @@ validated-model envelope.
   (activate the verbalizer's existing unused `'noisy'` style knob). High
   signal for Applied-Scientist framing; the harness already aggregates
   per-stage data, these are mostly new aggregations.
+- **Cheaper-than-a-model routing fix (evidence-driven).** The routing
+  matrix in `test_chat_roundtrip.py` showed ~20–30% of realistic
+  phrasings punt to the LLM purely from keyword-coverage gaps ("drop P2
+  by 20%", "how sensitive", "what changes if"). Broaden
+  `_check_deterministic_intent` / `detect_analysis_type_keyword_based`
+  patterns (and/or few-shot the existing model) and re-measure on the
+  matrix + round-trip eval. Only if misses persist does a second model
+  earn evaluation — must beat this catalogue, same bar as RAG/ML.
 
-### 5. Longer-term architecture (aspirational, unblocked but not urgent)
+### 4. Longer-term architecture (aspirational, unblocked but not urgent)
 
 - **Data layer beyond the xlsx fast path:** general CSV/Excel/long-vs-wide
   loaders + schema inference + LLM-assisted ambiguous-column mapping.
@@ -125,7 +131,10 @@ Solution export to CSV/JSON; flow / Gantt / network visualisation;
 fuzzy-match entity-name errors ("did you mean 'Seattle'?"); 2-D parameter
 sensitivity (currently 1-D); constraint-relaxation suggestion on infeasible
 ("relax demand by 10%?"); micro-opt: move the keyword analysis check ahead
-of `detect_intent` so the bare-what-if first-message path is fully LLM-free.
+of `detect_intent` so the bare-what-if first-message path is fully LLM-free;
+quiet a caught pyomo `ERROR: No eligible units` logged during a *successful*
+scheduling solve (internal LP-bound build attempt — result is correct, the
+ERROR-level log is misleading noise; surfaced by the chat harness).
 
 ---
 

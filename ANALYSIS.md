@@ -6,6 +6,54 @@ into their parent result — this is a log of conclusions, not a diary.
 
 ---
 
+## 2026-05-19 — Chat round-trip stress harness (deterministic regression net)
+
+**Problem.** The chat path — the integration surface every change flows
+through — had only piecemeal coverage. The transport-only-degradation
+class (scheduling silently mis-handled) had no net at the chat contract
+level; the one repository test that exercises it end-to-end is
+LLM-driven and flaky (`test_feasible_us_manufacturing`).
+
+**Solution.** `tests/test_chat_roundtrip.py`: a contract-correct
+`ScriptedLLM` (stubs the 4 agent-called LLM methods, routed on canonical
+phrases) + scripted intent seam, driving the *exact* endpoints the UI
+uses (`POST /jobs` → poll → `POST /chat/continue`) via `TestClient`. The
+real solver, 3-layer gate, and `_with_options` chip chokepoint run.
+Assertions target the **deterministic response envelope chat.html
+branches on** (`success`, `status`, `solution`, `next_options`,
+`reasons`/`suggestions`, `job_pending`, `response`) — not LLM prose, so
+it is stable. 9 turns: smalltalk · help · transport solve · scheduling
+solve · transport-infeasible · scheduling-infeasible · malformed ·
+pending-job free-text (no dead-end) · pending-job optimize action. The
+scheduling-infeasible turn asserts *scheduling* reasons, never
+transport's "supply" — the transport-only-degradation guard.
+
+**Result.** 9/9 pass; suite 217 passed, zero new regressions. Building
+it surfaced two non-blocking notes (system correct, just imprecise/
+noisy): the first-message path scripts `_llm_intent_detection`, not
+`detect_intent`; and a feasible scheduling solve logs a caught pyomo
+`ERROR: No eligible units` from an internal LP-bound build attempt —
+result correct (Cmax 5.0), ERROR-level log is noise (→ quick win).
+
+**Extension — routing matrix (answers "do we need another LLM?").**
+Added a phrasing matrix over the two *deterministic* (LLM-free) routers
+— `_check_deterministic_intent` (16 phrasings) and
+`detect_analysis_type_keyword_based` (13) — asserting clear cases route
+correctly and *cataloguing* the ones that legitimately punt to the LLM
+(`ESCALATE`), with a tripwire test so the ratio can't drift silently.
+**Finding:** the free keyword layer resolves ~75–80% of a realistic
+phrasing set; misses are **keyword-coverage gaps, not reasoning gaps**
+(e.g. "drop P2 capacity by 20%" has no trigger word; "how sensitive" ≠
+substring "sensitivity"; "what changes if" ≠ "what if"). The matrix also
+caught a wrong *catalogue* prediction — embedded greeting + optimization
+keywords correctly routes `optimization` (router more robust than
+assumed). **Decision: do NOT add a second model yet** — broaden the
+keyword layer / few-shot the existing model and re-measure first; a new
+model must beat this catalogue on the eval, same bar that killed RAG/ML.
+Suite **246 passed**, zero new regressions.
+
+---
+
 ## 2026-05-19 — Genuine Layer-2 feasibility for scheduling + curated infeasible corpus
 
 **Problem.** After the fail-closed refactor, scheduling still had no
