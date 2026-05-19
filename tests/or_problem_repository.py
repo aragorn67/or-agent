@@ -65,9 +65,11 @@ FEASIBLE vs SOLVABLE:
         - vaccine_cold_chain: feasible=True, solvable=False (no min-cost-flow solver)
         - infeasible_transport_*: feasible=False, solvable=False (test cases)
 
-STATISTICS (as of 2025-11-27):
-    - Total problems: 35
-    - Feasible: 32 (27 with data, 3 infeasible test cases)
+STATISTICS (as of 2026-05-19):
+    - Total problems: 41
+    - Infeasible test cases: 9 (transport + scheduling, Layers 0/1/2);
+      7 are machine-checkable (structured `params` +
+      `expected_infeasible_layer`) — see get_infeasible_problems()
     - Solvable: 14 (9 transport + 5 scheduling)
     - Need solvers: 18 (including 2 min-cost-flow, 3 job-shop/flow-shop)
 """
@@ -83,6 +85,7 @@ __all__ = [
     'get_problem_by_name',
     'get_problems_by_category',
     'get_solvable_problems',
+    'get_infeasible_problems',
     'get_categories',
     'list_problems',
     'get_solver_id'  # Helper to map problem types to solver IDs
@@ -675,6 +678,22 @@ Find a shipping plan that meets all assembly plant demands without exceeding fac
                 "x[i,j] <= arc_capacity[i,j] for all i,j"
             ]
         },
+        "params": {
+            "plants": ["F1", "F2", "F3"], "markets": ["A", "B", "C"],
+            "capacity": {"F1": 60, "F2": 60, "F3": 30},
+            "demand": {"A": 50, "B": 50, "C": 50},
+            "cost": {
+                "F1": {"A": 1, "B": 1, "C": 1},
+                "F2": {"A": 1, "B": 1, "C": 1},
+                "F3": {"A": 1, "B": 1, "C": 1},
+            },
+            "arc_capacity": {
+                "F1": {"A": 50, "B": 50, "C": 0},
+                "F2": {"A": 0, "B": 10, "C": 60},
+                "F3": {"A": 10, "B": 10, "C": 10},
+            },
+        },
+        "expected_infeasible_layer": 2,
                 "feasible": False,
         "solvable": False,
         "notes": (
@@ -686,6 +705,95 @@ Find a shipping plan that meets all assembly plant demands without exceeding fac
             "but then there is insufficient F2 capacity left to help cover B while respecting factory supply "
             "limits. This should pass simple aggregate checks and be caught only by the solver-based feasibility LP."
         )
+    },
+
+    {
+        "id": "transport/infeasible_struct/002",
+        "name": "infeasible_transport_negative_demand",
+        "category": ProblemCategory.TRANSPORTATION.value,
+        "expected_type": ProblemType.TRANSPORTATION.value,
+        "text": """A distributor ships from 2 depots (P1, P2) to 2 retail zones (M1, M2).
+
+Depot capacities: P1 = 50 units, P2 = 50 units.
+Zone demands: M1 = -30 units (ERROR: negative demand), M2 = 40 units.
+Costs ($/unit): P1→M1 2, P1→M2 3, P2→M1 4, P2→M2 1.
+
+Minimise total shipping cost while meeting demand within capacity.""",
+        "metadata": {
+            "units": {"cost": "USD/unit", "capacity": "units", "demand": "units"},
+            "scale": {"sources": 2, "sinks": 2},
+            "tags": ["cost_min", "infeasible_struct_layer0", "negative_demand"],
+        },
+        "expected_schema": {
+            "sets": ["I_plants", "J_markets"],
+            "params": ["capacity[i]", "demand[j]", "cost[i,j]"],
+            "vars": ["x[i,j] >= 0"],
+            "objective": "min sum_{i,j} cost[i,j]*x[i,j]",
+            "constraints": [
+                "sum_j x[i,j] <= capacity[i] for all i",
+                "sum_i x[i,j] >= demand[j] for all j",
+            ],
+        },
+        "params": {
+            "plants": ["P1", "P2"], "markets": ["M1", "M2"],
+            "capacity": {"P1": 50, "P2": 50},
+            "demand": {"M1": -30, "M2": 40},
+            "cost": {"P1": {"M1": 2, "M2": 3}, "P2": {"M1": 4, "M2": 1}},
+        },
+        "expected_infeasible_layer": 0,
+        "feasible": False,
+        "solvable": False,
+        "notes": "LAYER 0: a negative demand is structurally impossible; the "
+                 "domain-agnostic non-negativity check must reject it before "
+                 "any domain logic runs.",
+    },
+
+    {
+        "id": "transport/infeasible_aggregate/002",
+        "name": "infeasible_transport_sink_capacity_shortfall",
+        "category": ProblemCategory.TRANSPORTATION.value,
+        "expected_type": ProblemType.TRANSPORTATION.value,
+        "text": """Two plants (P1, P2) supply two markets (M1, M2).
+
+Plant capacities: P1 = 100, P2 = 100 (ample total supply).
+Market demands: M1 = 40, M2 = 60.
+All routes have defined costs ($/unit): P1→M1 2, P1→M2 3, P2→M1 4, P2→M2 1.
+Per-lane weekly capacity limits: into M1 = 100 each; into M2 only 20 from
+P1 and 20 from P2 (so at most 40 can ever reach M2, which needs 60).
+
+Minimise cost while meeting all demand within plant and lane capacities.""",
+        "metadata": {
+            "units": {"cost": "USD/unit", "capacity": "units",
+                      "demand": "units", "arc_capacity": "units"},
+            "scale": {"sources": 2, "sinks": 2},
+            "tags": ["cost_min", "infeasible_layer1", "sink_capacity_shortfall"],
+        },
+        "expected_schema": {
+            "sets": ["I_plants", "J_markets"],
+            "params": ["capacity[i]", "demand[j]", "cost[i,j]", "arc_capacity[i,j]"],
+            "vars": ["x[i,j] >= 0"],
+            "objective": "min sum_{i,j} cost[i,j]*x[i,j]",
+            "constraints": [
+                "sum_j x[i,j] <= capacity[i] for all i",
+                "sum_i x[i,j] >= demand[j] for all j",
+                "x[i,j] <= arc_capacity[i,j] for all i,j",
+            ],
+        },
+        "params": {
+            "plants": ["P1", "P2"], "markets": ["M1", "M2"],
+            "capacity": {"P1": 100, "P2": 100},
+            "demand": {"M1": 40, "M2": 60},
+            "cost": {"P1": {"M1": 2, "M2": 3}, "P2": {"M1": 4, "M2": 1}},
+            "arc_capacity": {"P1": {"M1": 100, "M2": 20},
+                             "P2": {"M1": 100, "M2": 20}},
+        },
+        "expected_infeasible_layer": 1,
+        "feasible": False,
+        "solvable": False,
+        "notes": "LAYER 1: total supply is ample and all routes exist (passes "
+                 "Layer 0), but the incoming lane capacities into M2 sum to 40 "
+                 "< demand 60 — a problem-specific necessary-condition check "
+                 "(per-sink capacity) catches this without the solver.",
     },
 ]
 
@@ -1061,6 +1169,168 @@ Minimize sum of T_j (total tardiness).""",
                 "feasible": True,
         "solvable": False,
         "notes": "Classic 1||∑T_j problem for testing classification"
+    },
+
+    {
+        "id": "sched/infeasible_struct/001",
+        "name": "infeasible_scheduling_negative_processing",
+        "category": ProblemCategory.SCHEDULING.value,
+        "expected_type": ProblemType.SINGLE_STAGE_SCHEDULING.value,
+        "text": """Single-stage scheduling: 2 orders (A, B) on one unit U1.
+
+Processing times (hours): A = -2 on U1 (ERROR: negative), B = 3 on U1.
+Due dates: A by hour 10, B by hour 10. Both orders may run on U1.
+
+Minimise makespan while meeting due dates.""",
+        "metadata": {
+            "units": {"time": "hours"},
+            "scale": {"orders": 2, "machines": 1},
+            "tags": ["makespan_min", "infeasible_struct_layer0",
+                     "negative_processing_time"],
+        },
+        "expected_schema": {
+            "sets": ["O_orders", "U_units"],
+            "params": ["proc_time[o,u]", "due[o]", "eligible[o,u]"],
+            "vars": ["start[o,u] >= 0", "assign[o,u] in {0,1}"],
+            "objective": "min makespan",
+            "constraints": ["sum_u assign[o,u] = 1 for all o"],
+        },
+        "params": {
+            "orders": ["A", "B"], "units": ["U1"],
+            "processing_time": {"A": {"U1": -2.0}, "B": {"U1": 3.0}},
+            "due_date": {"A": 10.0, "B": 10.0},
+            "eligible": {"A": ["U1"], "B": ["U1"]},
+        },
+        "expected_infeasible_layer": 0,
+        "feasible": False,
+        "solvable": False,
+        "notes": "LAYER 0: a negative processing time is structurally "
+                 "impossible; the recursive non-negativity check (which now "
+                 "descends into nested processing_time dicts) rejects it.",
+    },
+
+    {
+        "id": "sched/infeasible_necessary/001",
+        "name": "infeasible_scheduling_deadline_shorter_than_work",
+        "category": ProblemCategory.SCHEDULING.value,
+        "expected_type": ProblemType.SINGLE_STAGE_SCHEDULING.value,
+        "text": """Single-stage scheduling: 3 orders (A, B, C) on one unit U1.
+
+Processing times (hours) on U1: A = 2, B = 2, C = 5.
+Due dates: A by hour 10, B by hour 10, C by hour 4.
+Every order may run on U1.
+
+Minimise makespan while meeting all due dates.""",
+        "metadata": {
+            "units": {"time": "hours"},
+            "scale": {"orders": 3, "machines": 1},
+            "tags": ["makespan_min", "infeasible_layer1",
+                     "deadline_shorter_than_processing"],
+        },
+        "expected_schema": {
+            "sets": ["O_orders", "U_units"],
+            "params": ["proc_time[o,u]", "due[o]", "eligible[o,u]"],
+            "vars": ["start[o,u] >= 0", "assign[o,u] in {0,1}"],
+            "objective": "min makespan",
+            "constraints": [
+                "start[o,u] + proc_time[o,u] <= due[o] for eligible (o,u)",
+            ],
+        },
+        "params": {
+            "orders": ["A", "B", "C"], "units": ["U1"],
+            "processing_time": {"A": {"U1": 2.0}, "B": {"U1": 2.0},
+                                "C": {"U1": 5.0}},
+            "due_date": {"A": 10.0, "B": 10.0, "C": 4.0},
+            "eligible": {"A": ["U1"], "B": ["U1"], "C": ["U1"]},
+        },
+        "expected_infeasible_layer": 1,
+        "feasible": False,
+        "solvable": False,
+        "notes": "LAYER 1: order C needs 5 h on its only eligible unit but is "
+                 "due at hour 4 — no schedule on any number of units can meet "
+                 "that. The scheduling necessary-condition check (min eligible "
+                 "processing <= due date) catches it before the solver.",
+    },
+
+    {
+        "id": "sched/infeasible_necessary/002",
+        "name": "infeasible_scheduling_no_eligible_unit",
+        "category": ProblemCategory.SCHEDULING.value,
+        "expected_type": ProblemType.SINGLE_STAGE_SCHEDULING.value,
+        "text": """Single-stage scheduling: 2 orders (A, B) and one unit U1.
+
+A may run on U1 (2 h). B has NO eligible unit (its eligible list is empty),
+so it can never be scheduled. Due dates: A by 10, B by 10.
+
+Minimise makespan while meeting due dates.""",
+        "metadata": {
+            "units": {"time": "hours"},
+            "scale": {"orders": 2, "machines": 1},
+            "tags": ["makespan_min", "infeasible_layer1", "no_eligible_unit"],
+        },
+        "expected_schema": {
+            "sets": ["O_orders", "U_units"],
+            "params": ["proc_time[o,u]", "due[o]", "eligible[o,u]"],
+            "vars": ["start[o,u] >= 0", "assign[o,u] in {0,1}"],
+            "objective": "min makespan",
+            "constraints": ["sum_u assign[o,u] = 1 for all o"],
+        },
+        "params": {
+            "orders": ["A", "B"], "units": ["U1"],
+            "processing_time": {"A": {"U1": 2.0}, "B": {"U1": 3.0}},
+            "due_date": {"A": 10.0, "B": 10.0},
+            "eligible": {"A": ["U1"], "B": []},
+        },
+        "expected_infeasible_layer": 1,
+        "feasible": False,
+        "solvable": False,
+        "notes": "LAYER 1: order B has an explicitly empty eligibility list, "
+                 "so it can never be assigned — caught by the scheduling "
+                 "necessary-condition check, not the solver.",
+    },
+
+    {
+        "id": "sched/infeasible_network/001",
+        "name": "infeasible_scheduling_joint_overload",
+        "category": ProblemCategory.SCHEDULING.value,
+        "expected_type": ProblemType.SINGLE_STAGE_SCHEDULING.value,
+        "text": """Single-stage scheduling: 2 orders (A, B) on one unit U1.
+
+Each takes 3 hours on U1. Both are due by hour 4.
+Individually each fits (3 <= 4), but U1 can run only one at a time, so the
+second necessarily finishes at hour 6 > 4.
+
+Minimise makespan while meeting all due dates.""",
+        "metadata": {
+            "units": {"time": "hours"},
+            "scale": {"orders": 2, "machines": 1},
+            "tags": ["makespan_min", "infeasible_layer2",
+                     "joint_capacity_overload"],
+        },
+        "expected_schema": {
+            "sets": ["O_orders", "U_units"],
+            "params": ["proc_time[o,u]", "due[o]", "eligible[o,u]"],
+            "vars": ["start[o,u] >= 0", "assign[o,u] in {0,1}"],
+            "objective": "min makespan",
+            "constraints": [
+                "start[o,u] + proc_time[o,u] <= due[o] for eligible (o,u)",
+                "no_overlap on each unit",
+            ],
+        },
+        "params": {
+            "orders": ["A", "B"], "units": ["U1"],
+            "processing_time": {"A": {"U1": 3.0}, "B": {"U1": 3.0}},
+            "due_date": {"A": 4.0, "B": 4.0},
+            "eligible": {"A": ["U1"], "B": ["U1"]},
+        },
+        "expected_infeasible_layer": 2,
+        "feasible": False,
+        "solvable": False,
+        "notes": "LAYER 2: each order alone meets its 4 h deadline (Layer 1 "
+                 "passes: 3 <= 4), but two 3 h jobs cannot both finish by hour "
+                 "4 on a single unit. Only the solver-based LP-relaxation "
+                 "layer — now genuinely available for scheduling — sees the "
+                 "coupling.",
     },
 ]
 
@@ -1650,6 +1920,23 @@ def get_problems_by_category(category: str) -> List[Dict]:
 def get_solvable_problems() -> List[Dict]:
     """Return only problems that current system can solve."""
     return [p for p in get_all_problems() if p.get("solvable", False)]
+
+def get_infeasible_problems(machine_checkable: bool = False) -> List[Dict]:
+    """Return the curated infeasible problems (``feasible == False``).
+
+    With ``machine_checkable=True`` return only those that carry a
+    structured ``params`` dict and an ``expected_infeasible_layer`` — the
+    subset a deterministic, LLM-free feasibility test can iterate to assert
+    each instance is rejected at exactly its tagged layer (0/1/2), across
+    both transportation and single-stage scheduling.
+    """
+    infeasible = [p for p in get_all_problems() if not p.get("feasible", True)]
+    if machine_checkable:
+        return [
+            p for p in infeasible
+            if "params" in p and "expected_infeasible_layer" in p
+        ]
+    return infeasible
 
 def get_problem_by_name(name: str) -> Optional[Dict]:
     """Get a specific problem by its name."""

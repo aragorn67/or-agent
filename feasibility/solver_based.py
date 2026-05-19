@@ -171,11 +171,60 @@ def _set_dummy_objective(model):
 
 
 def _convert_instance_to_params(instance):
-    """Convert feasibility instance format to solver params format."""
+    """Convert a feasibility instance into the param shape its solver's
+    ``build_model`` expects.
+
+    Domain-aware (was transport-only): this is the per-domain "glue" that
+    lets Layer 2 run for ANY solver exposing ``build_model``. Adding a new
+    OR domain means: register its Layer-1 plugin AND add a branch here
+    (or give the instance a shape this already recognises). Scheduling is
+    detected by its params; transport by its I*/J* sets; anything else
+    passes params through untouched (the solver/relaxation will error →
+    UNKNOWN, which core.py now treats fail-closed).
+    """
     sets = instance.sets if hasattr(instance, 'sets') else instance.get('sets', {})
     params = instance.params if hasattr(instance, 'params') else instance.get('params', {})
 
-    # For transportation problems
+    # --- Single-stage scheduling -------------------------------------
+    # The IPM solver's build_model wants lists `orders`/`units` plus
+    # `eligible`/`processing_time`/`due_date` (processing_time may stay
+    # tuple-keyed — _normalize_matrix_ij handles that). The feasibility
+    # instance carries orders/units in sets (I_orders/I_units) and the
+    # rest in params.
+    if 'processing_time' in params and 'due_date' in params:
+        def _set_like(*needles):
+            for k, v in sets.items():
+                kl = k.lower()
+                if any(n in kl for n in needles):
+                    return list(v)
+            return None
+
+        orders = _set_like('order', 'job', 'task')
+        units = _set_like('unit', 'machine', 'resource')
+        # Fall back to deriving the universes from the params themselves.
+        if orders is None:
+            orders = list(params['due_date'].keys())
+        if units is None:
+            units = sorted({
+                k[1] for k in params['processing_time']
+                if isinstance(k, tuple) and len(k) == 2
+            } or {
+                u for v in params['processing_time'].values()
+                if isinstance(v, dict) for u in v
+            })
+        sched = {
+            "orders": orders,
+            "units": units,
+            "eligible": params.get('eligible', {}),
+            "processing_time": params['processing_time'],
+            "due_date": params['due_date'],
+        }
+        for opt in ("changeover", "window", "lower", "objective"):
+            if opt in params:
+                sched[opt] = params[opt]
+        return sched
+
+    # --- Transportation ----------------------------------------------
     sources_key = None
     sinks_key = None
 

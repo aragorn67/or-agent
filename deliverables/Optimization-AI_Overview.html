@@ -99,7 +99,7 @@ extraction fails loudly instead of producing a confident wrong answer.</p>
 <li>First answer is slow on CPU (~2&ndash;3 min of local LLM inference) &mdash; the
 next roadmap item makes the wait visible/streamed</li>
 <li>Two problem families so far; more to add</li>
-<li>Heuristic warm-start helps LP, not yet fixed-charge-aware</li>
+<li>Heuristic warm-start is an honest negative on current formulations (kept for the interactive UX + LP bound, not as a speedup &mdash; &sect;9)</li>
 <li>Explanation wording varies slightly run-to-run (the <em>numbers</em> do not)</li>
 </ul>
 </td>
@@ -312,24 +312,33 @@ sources &times; sinks), finite &amp; non-negative values</td>
 <td><code>capacity = &minus;50</code>; cost matrix of the wrong shape</td>
 </tr>
 <tr>
-<td><strong>1 &mdash; Problem-specific necessary conditions</strong><br>(domain knowledge)</td>
-<td>e.g. transportation: total supply &ge; total demand (with FP tolerance),
-capacity vs. demand &mdash; necessary, not sufficient</td>
+<td><strong>1 &mdash; Problem-specific necessary conditions</strong><br>(one <code>FeasibilityPlugin</code> per domain)</td>
+<td>Each domain registers <em>one</em> plugin bundling its checker and its
+repair-suggestion generator, so a domain cannot be half-wired. Transport:
+total supply &ge; demand, per-sink capacity. Scheduling: an order's fastest
+eligible processing time &le; its due date; no order without an eligible unit</td>
 <td>microseconds</td>
-<td>total demand 900 &gt; total supply 700 &rarr; reports the 200 shortfall</td>
+<td>demand 900 &gt; supply 700 &rarr; 200 shortfall; "OrderC needs 5&nbsp;h, due hour&nbsp;4"</td>
 </tr>
 <tr>
 <td><strong>2 &mdash; Solver-based</strong><br>(LP relaxation, the backstop)</td>
-<td>Builds the real Pyomo model, relaxes binary/integer &rarr; continuous,
-swaps in a dummy 0 objective, solves <em>only for feasibility</em></td>
+<td>Builds the real Pyomo model via the solver's <code>build_model</code>,
+relaxes binary/integer &rarr; continuous, solves <em>only for feasibility</em>.
+Conclusive for <strong>both</strong> transportation and scheduling, and
+automatic for any future solver exposing <code>build_model</code></td>
 <td>one LP solve</td>
-<td>interaction / per-arc-capacity patterns Layers&nbsp;0&ndash;1 cannot see</td>
+<td>interaction / per-arc-capacity or joint-deadline patterns Layers&nbsp;0&ndash;1 cannot see</td>
 </tr>
 </table>
-<p>Layer&nbsp;2 returns FEASIBLE / INFEASIBLE / UNKNOWN; if inconclusive it
-defers to "feasible because Layers&nbsp;0+1 passed." The report carries
-<code>status</code>, <code>reasons</code>, <code>layer_passed</code> (a
-debugging aid) and actionable <code>suggestions</code>.</p>
+<p>Layer&nbsp;2 returns FEASIBLE / INFEASIBLE / UNKNOWN. The gate is
+<strong>fail-closed</strong>: an inconclusive layer yields <code>UNKNOWN</code>
+&mdash; it never asserts "feasible from ignorance" &mdash; and defers to the
+hardened, fail-soft solver as the real backstop. The report carries
+<code>status</code>, <code>reasons</code>, <code>layer_passed</code> and
+actionable <code>suggestions</code>. The gate is regression-pinned by a
+curated, machine-checkable infeasible corpus (transportation + scheduling,
+one case per layer) that asserts each instance is rejected at exactly its
+intended layer.</p>
 <p><strong>Why this matters.</strong> This is the guardrail against LLM
 hallucination. If the extractor invents or mis-reads a parameter, the
 structured checks catch the inconsistency <em>before</em> the solver runs

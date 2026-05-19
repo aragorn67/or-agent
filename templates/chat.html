@@ -171,6 +171,30 @@ function addMsg(text, who, nodes){
   messages.scrollTop = messages.scrollHeight;
 }
 
+// Turn a failed payload into a readable multi-line bubble. An infeasible
+// verdict carries reasons/suggestions but no `error` string; without this
+// the !success branches would JSON.stringify the whole payload (the
+// feasibility explanation would be silently lost). Bubble CSS is
+// white-space:pre-wrap, so real \n render as line breaks.
+function errText(d){
+  if (d.error) return '❌ ' + d.error;
+  const reasons = d.reasons || [];
+  const sugg = d.suggestions || [];
+  if (d.status === 'infeasible' || reasons.length || sugg.length){
+    const out = ['❌ ' + (d.message || 'This problem is infeasible.')];
+    if (reasons.length){
+      out.push('', 'Why:');
+      reasons.forEach(r => out.push(' • ' + r));
+    }
+    if (sugg.length){
+      out.push('', '💡 To make it work, you could:');
+      sugg.forEach(s => out.push(' • ' + s));
+    }
+    return out.join('\n');
+  }
+  return '❌ ' + JSON.stringify(d);
+}
+
 function card(rows){
   const c = document.createElement('div');
   c.className = 'card';
@@ -451,7 +475,7 @@ async function send(){
       if (!d) {
         addMsg('❌ The solve could not start or timed out.', 'agent');
       } else if (!d.success) {
-        addMsg('❌ ' + (d.error || JSON.stringify(d)), 'agent');
+        addMsg(errText(d), 'agent');
         showChips(d);
       } else if (!d.solution) {
         // Conversational reply with no solution to render — a first-message
@@ -501,7 +525,7 @@ async function send(){
         if (d.solution) { lastPayload = d; autoRenderTable(); }
         showChips(d);
       } else if (!d.success) {
-        addMsg('❌ ' + (d.error || JSON.stringify(d)), 'agent');
+        addMsg(errText(d), 'agent');
         showChips(d);
       } else {
         const s = d.solution || {};

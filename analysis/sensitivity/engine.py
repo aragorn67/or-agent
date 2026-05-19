@@ -76,7 +76,11 @@ def perform_sensitivity_analysis(
         test_instance = build_instance_from_params(test_params, problem_type, solver_id)
 
         feas_check = check_feasibility(test_instance)
-        if feas_check.status == FeasStatus.FEASIBLE:
+        # Proceed unless PROVABLY infeasible. A non-FEASIBLE/UNKNOWN
+        # verdict (e.g. scheduling, whose Layer-2 LP path is inconclusive)
+        # must not silently drop the point — the solver is the backstop
+        # and the `status == 'OPTIMAL'` guard below is the real gate.
+        if feas_check.status != FeasStatus.INFEASIBLE:
             # Solve
             test_solution = solver.solve(test_params)
             if test_solution and test_solution.get('status') == 'OPTIMAL':

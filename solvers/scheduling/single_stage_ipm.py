@@ -17,6 +17,7 @@ from typing import Dict, List, Any, Optional, Tuple
 from pyomo.environ import (
     ConcreteModel, Set, Param, Var, NonNegativeReals, Binary,
     Objective, Constraint, minimize, value, TransformationFactory,
+    SolverFactory,
 )
 from pyomo.contrib.appsi.solvers.highs import Highs
 from ..base import OptimizationSolver
@@ -127,53 +128,22 @@ class SingleStageIPMSolver(OptimizationSolver):
             "objective": "makespan"
         }
 
-    def solve(
-        self,
-        params: Dict[str, Any],
-        warm_start: Optional[Dict[str, Any]] = None,
-        time_limit: float = 60.0,
-        gap_target: float = 0.01,
-    ) -> Dict[str, Any]:
+    def build_model(self, params: Dict[str, Any]):
         """
-        Build & solve the Immediate-Precedence Single-Stage MILP (IPM) with HiGHS.
+        Construct the Immediate-Precedence Single-Stage MILP (no solve).
 
-        Args:
-            params: scheduling parameters (orders, units, eligible,
-                processing_time, due_date, optional changeover/window/lower/objective).
-            warm_start: optional dict with keys
-                - "assignment": {order -> unit}
-                - "sequence": {unit -> [orders in order]}
-                - "completion": {order -> float}
-                - "cmax": float
-                Used to seed Y, XX, C, Cmax variables. Gated on integer-var
-                presence — this solver IS a MIP so the gate always passes.
-            time_limit: hard time limit passed to HiGHS (seconds).
-            gap_target: acceptable relative MIP gap (HiGHS mip_rel_gap).
+        Factored out of ``solve()`` so the same model can be (a) solved,
+        (b) LP-relaxed for a bound, and (c) used by the Layer-2
+        solver-based feasibility check — which only runs for solvers that
+        expose ``build_model``. Returns the Pyomo ``ConcreteModel`` with
+        its original objective intact.
 
-        Returns:
-            {
-                "status": "OPTIMAL" | "INFEASIBLE" | ...,
-                "solver_id": "single_stage_ipm_scheduling",
-                "objective": float,
-                "objective_value": float,
-                "best_bound": float | None,
-                "gap": float | None,
-                "assignments": [{"order": str, "unit": str}, ...],
-                "arcs": [{"pred": str, "succ": str, "unit": str}, ...],
-                "completion": {order: float, ...},
-                "Cmax": float,
-                "objective_type": "makespan" | "changeover",
-                "warm_started": bool,
-            }
+        Raises ``ValueError`` on invalid params so direct callers (Layer 2)
+        fail cleanly into UNKNOWN rather than crashing.
         """
-        # Validate
         errors = self.validate_params(params)
         if errors:
-            return {
-                "status": "VALIDATION_ERROR",
-                "solver_id": self.solver_id,
-                "errors": errors
-            }
+            raise ValueError("; ".join(errors))
 
         I: List[str] = [str(x) for x in params["orders"]]
         J: List[str] = [str(x) for x in params["units"]]
@@ -315,6 +285,66 @@ class SingleStageIPMSolver(OptimizationSolver):
             )
         else:  # "makespan" default
             m.OBJ = Objective(expr=m.Cmax, sense=minimize)
+
+        return m
+
+    def solve(
+        self,
+        params: Dict[str, Any],
+        warm_start: Optional[Dict[str, Any]] = None,
+        time_limit: float = 60.0,
+        gap_target: float = 0.01,
+    ) -> Dict[str, Any]:
+        """
+        Build & solve the Immediate-Precedence Single-Stage MILP (IPM) with HiGHS.
+
+        Args:
+            params: scheduling parameters (orders, units, eligible,
+                processing_time, due_date, optional changeover/window/lower/objective).
+            warm_start: optional dict with keys
+                - "assignment": {order -> unit}
+                - "sequence": {unit -> [orders in order]}
+                - "completion": {order -> float}
+                - "cmax": float
+                Used to seed Y, XX, C, Cmax variables. Gated on integer-var
+                presence — this solver IS a MIP so the gate always passes.
+            time_limit: hard time limit passed to HiGHS (seconds).
+            gap_target: acceptable relative MIP gap (HiGHS mip_rel_gap).
+
+        Returns:
+            {
+                "status": "OPTIMAL" | "INFEASIBLE" | ...,
+                "solver_id": "single_stage_ipm_scheduling",
+                "objective": float,
+                "objective_value": float,
+                "best_bound": float | None,
+                "gap": float | None,
+                "assignments": [{"order": str, "unit": str}, ...],
+                "arcs": [{"pred": str, "succ": str, "unit": str}, ...],
+                "completion": {order: float, ...},
+                "Cmax": float,
+                "objective_type": "makespan" | "changeover",
+                "warm_started": bool,
+            }
+        """
+        # Validate
+        errors = self.validate_params(params)
+        if errors:
+            return {
+                "status": "VALIDATION_ERROR",
+                "solver_id": self.solver_id,
+                "errors": errors
+            }
+
+        # Model construction lives in build_model() (shared with the LP
+        # relaxation and the Layer-2 feasibility check).
+        m = self.build_model(params)
+
+        # solve() still needs these few scalars — cheap to re-derive, no
+        # model side effects: warm-start seeding + result extraction.
+        I: List[str] = [str(x) for x in params["orders"]]
+        J: List[str] = [str(x) for x in params["units"]]
+        objective = params.get("objective", "makespan").lower().strip()
 
         # Apply warm-start if provided AND the model is MIP (always true here).
         warm_start_applied = False
@@ -472,40 +502,29 @@ class SingleStageIPMSolver(OptimizationSolver):
         Returns:
             {"status": str, "bound": float | None}
         """
-        errors = self.validate_params(params)
-        if errors:
-            return {"status": "VALIDATION_ERROR", "bound": None, "errors": errors}
+        try:
+            m = self.build_model(params)
+        except ValueError as e:
+            return {"status": "VALIDATION_ERROR", "bound": None, "errors": [str(e)]}
 
-        # Build the same model but relax integer/binary vars.
-        original_solve = self.solve
-        # Side-step: we need the model without solving. The simplest path is to
-        # call solve() but intercept the model — easier: copy build logic.
-        # Since the model build is intermixed with solve(), we relax in-place:
-        result = self._build_and_solve_relaxation(params)
-        return result
+        # Relax every binary/integer var to continuous, then solve as an LP.
+        # For the makespan objective the relaxed optimum is a valid LOWER
+        # bound on the MILP makespan (now that build_model is factored out
+        # this is exact, not the old NOT_IMPLEMENTED placeholder).
+        TransformationFactory("core.relax_integer_vars").apply_to(m)
 
-    def _build_and_solve_relaxation(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """Build the IPM model, relax integers, and solve as LP."""
-        # We re-run the build logic by calling solve() with a sentinel to get
-        # the model — but solve() doesn't expose the model. To keep this
-        # tractable, we duplicate the minimal setup: it's enough to relax all
-        # binary vars to continuous and call HiGHS in LP mode.
-        # Trick: solve_with_relaxation hook — we re-build by re-invoking the
-        # solver internals through a tiny helper.
-        from pyomo.environ import ConcreteModel as _CM
-        # Re-build using the public solve path is messy; instead we build the
-        # full MILP, then relax + drop the objective sense's integrality.
-        I: List[str] = [str(x) for x in params["orders"]]
-        J: List[str] = [str(x) for x in params["units"]]
+        solver = SolverFactory("glpk")
+        try:
+            res = solver.solve(m, tee=False, load_solutions=False)
+        except Exception as e:
+            return {"status": "ERROR", "bound": None, "message": str(e)}
 
-        # Re-use the same construction by calling solve(...) with a tiny time
-        # limit to bail out fast IF needed. Cleaner: factor out a build_model
-        # method later; for Phase 2 MVP we accept this gap and report a
-        # heuristic-only bound (cmax of LPT serves as upper bound; lower bound
-        # is harder without refactoring).
-        return {"status": "NOT_IMPLEMENTED", "bound": None,
-                "message": "LP relaxation for scheduling not yet exposed; "
-                           "use heuristic_cmax as upper-bound reference only."}
+        tc = str(res.solver.termination_condition).lower()
+        if tc not in ("optimal", "feasible"):
+            return {"status": tc.upper(), "bound": None}
+
+        m.solutions.load_from(res)
+        return {"status": "OPTIMAL", "bound": round(float(value(m.OBJ)), 6)}
 
     # Helper methods for normalization
     def _normalize_matrix_ij(self, d: Dict[str, Any]) -> Dict[Tuple[str, str], float]:

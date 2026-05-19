@@ -13,7 +13,7 @@ the agent:
 1. Detects intent (new problem vs. follow-up vs. small talk).
 2. Classifies the problem family (transportation, scheduling, ...) using a JSON-schema-bound classifier with majority voting.
 3. Routes to the matching specialist extractor, which converts prose to a typed parameter dict.
-4. Runs a three-layer feasibility check (structural → problem-specific necessary conditions → solver-based) before invoking the solver, so hallucinated parameters do not silently corrupt the result.
+4. Runs a three-layer feasibility check (structural → problem-specific necessary conditions → solver-based LP relaxation) before invoking the solver, so hallucinated parameters do not silently corrupt the result. The gate is **fail-closed** — an inconclusive layer returns `UNKNOWN`, never a guessed "feasible" — and **domain-general**: each problem family registers one `FeasibilityPlugin` bundling its checker and repair-suggestion generator, so a domain cannot be half-wired and Layer 2 is conclusive for both transportation and scheduling.
 5. Solves with Pyomo + HiGHS and returns the objective value, flows, and KPIs.
 6. Generates a plain-language explanation of the solution.
 
@@ -41,7 +41,7 @@ natural language input
         │
         ▼
 ┌──────────────────────────┐
-│  Feasibility (3 layers)  │ structural → problem-specific → LP relaxation
+│  Feasibility (3 layers)  │ structural → per-domain plugin → LP relaxation (fail-closed)
 └──────────────────────────┘
         │ (feasible)
         ▼
@@ -55,7 +55,7 @@ natural language input
 └──────────────────────────┘
 ```
 
-The LLM layer uses an abstract `LLMClient` interface so providers are swappable. The current backend is local Ollama with `qwen3:14b` across all stages; the same interface is designed to accept Anthropic, OpenAI, or other remote-API backends.
+The LLM layer uses an abstract `LLMClient` interface so providers are swappable. The current backend is local Ollama with `qwen3:8b` across all stages (selected over `qwen3:14b` by the model sweep — see *Baseline vs. system* below); the same interface is designed to accept Anthropic, OpenAI, or other remote-API backends.
 
 ## Quickstart
 
@@ -184,20 +184,41 @@ python -m evals.run_eval --n 20                              # 20 fresh seeds, t
 
 The CLI defaults to local Ollama (`--backend ollama`); pass `--backend groq` to opt into the hosted backend. The framework writes a timestamped JSON report under `evals/results/` containing the six headline metrics.
 
-**Baseline results (qwen3:14b, local Ollama):**
+**System results (default `qwen3:8b`, local Ollama, n=3 seeds):**
 - *Transportation* — classification accuracy 1.00, mean parameter recall 1.00, median objective gap 0.00, end-to-end pass rate 1.00.
-- *Single-stage scheduling* — classification accuracy 1.00, mean parameter recall 1.00, median objective gap 0.00, end-to-end pass rate 1.00 (3/3 seeds).
+- *Single-stage scheduling* — classification accuracy 1.00, mean parameter recall 1.00, median objective gap 0.00, end-to-end pass rate 1.00.
 
 The framework has already paid for itself during development by surfacing four real bugs the existing hand-curated test set had missed: one feasibility-checker bug on the transport side, plus three on the scheduling side (an f-string format-spec crash in the scheduling extractor's system prompt, a non-recursive non-negativity check that rejected nested `processing_time` dicts, and an extraction-dispatch list that lagged behind the classifier's solver mapping).
 
-Caveat: synthetic random problems with feasibility margins built in are the easy end of the input distribution. The 27-problem hand-curated set under `tests/or_problem_repository.py` is held out as a realism benchmark.
+Caveat: synthetic random problems with feasibility margins built in are the easy end of the input distribution. The hand-curated set under `tests/or_problem_repository.py` (41 problems, incl. 9 infeasible across both domains and all three feasibility layers) is held out as a realism benchmark.
+
+## Baseline vs. system
+
+Design decisions here were made by evaluation, not intuition — including rejecting things that did not earn their complexity. Every number below comes from a run recorded in `ANALYSIS.md`.
+
+| Question | Baseline | This system | Decision |
+|---|---|---|---|
+| Parameter extraction: retrieval-augmented vs. direct | RAG ≈ **50%** accuracy (+ higher latency) | JSON-schema-bound LLM, no RAG ≈ **70%** | RAG **rejected** on evidence |
+| Classification: learned vs. LLM | RandomForest on real OR ≈ **44%** | JSON-schema LLM + N-vote majority ≈ **70%** | Learned classifier **rejected** |
+| Default model | `qwen3:14b` | `qwen3:8b` — identical accuracy at n=3 both domains, **~2× faster** | Default **flipped** to 8b; `qwen2.5:7b` rejected (transport recall 0.90 → fails) |
+| Heuristic→MILP warm-start | cold solve | warm solve | **Honest negative**: ~1.00–1.02× on pure-LP and IPM (the headline "6.6×" was one non-representative instance) — kept for the interactive UX + LP bound, *not* claimed as a speedup |
+| Feasibility before solve | solver raises on infeasible | 3-layer fail-closed gate | Plain-language reasons + suggestions; no false-feasible |
+
+## Failure analysis
+
+Where the system has broken, why, and what fixed it (full detail in `ANALYSIS.md`):
+
+- **Silent transport-only degradation.** The post-solve stack (modification parse/apply, feasibility, suggestions) was written for transport and *silently* mis-handled scheduling — at worst returning a confidently-wrong *feasible* answer (€8) for an infeasible schedule. Fix pattern throughout: explicit per-domain dispatch + "unhandled ⇒ surface it, never silently pass".
+- **Fail-open feasibility default.** Layer-2 `UNKNOWN` was mapped to `FEASIBLE` "if Layers 0–1 pass" — a latent false-feasible for any domain without a Layer-1 check. Now fail-closed (`UNKNOWN`), with the hardened solver as backstop.
+- **LLM structured-output footguns.** `qwen3`/`deepseek-r1` emit `{}` instantly under Ollama `format=json` (never set it for those); Groq-Llama writes arithmetic like `a*b` instead of numbers (prompts must forbid it); a stale Groq model ID silently zeroed a sweep row. These are documented as guardrails, not one-off patches.
+- **Expected-but-absent speedup.** Warm-start was assumed to accelerate every solve; measured null on the current formulations. Reported honestly rather than cherry-picked.
 
 ## Project status
 
 **Works today:**
 - Bipartite single-commodity transportation (Pyomo + HiGHS)
 - Single-stage scheduling (IPM-based makespan)
-- Three-layer feasibility checking with diagnostic suggestions
+- Three-layer feasibility gate — fail-closed and domain-general (`FeasibilityPlugin` per family; Layer 2 conclusive for both transportation and scheduling), with plain-language reasons + repair suggestions and a curated per-layer infeasible corpus (`tests/test_infeasible_corpus.py`)
 - Sensitivity / what-if / re-solve follow-up analysis on transportation
 - Round-trip eval framework for both transportation and single-stage scheduling
 - Interactive heuristic + warm-start (VAM for transport) with LP bound reporting and a two-call API protocol (`/solve mode=heuristic_then_ask` → `/chat/continue`)
