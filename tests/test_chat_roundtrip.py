@@ -290,6 +290,10 @@ INTENT_MATRIX = [
     ("why?", _CTX, "follow_up"),
     ("how many plants?", _CTX, "follow_up"),
     ("tell me more", _CTX, "follow_up"),
+    # broadened follow-up patterns (context-gated) — these resolved to
+    # ESCALATE before the routing fix, now deterministic:
+    ("suppose P2 drops to 50", _CTX, "follow_up"),
+    ("rerun with that change", _CTX, "follow_up"),
     # --- legitimately ambiguous: documented to need the LLM ---
     # bare imperative modification, no question word / "what if" / context kw
     ("suppose Boston drops to 50", None, ESCALATE),
@@ -312,12 +316,18 @@ ANALYSIS_MATRIX = [
     ("reoptimize after the change", "resolve"),
     ("pareto front of cost vs distance", "pareto"),
     ("show the cost and distance tradeoff", "pareto"),
-    # --- documented brittleness: realistic phrasings the keyword router
-    #     misses today (no trigger substring) -> punts to LLM ---
+    # closed by the routing fix (safe, phrase-based — no first-message
+    # misroute risk): 'sensitiv' now covers "sensitive"; "what changes
+    # if" is an explicit what_if phrasing.
+    ("how sensitive is the plan to freight", "sensitivity"),
+    ("what changes if I add a plant", "what_if"),
+    # --- DELIBERATELY left to the LLM (not a gap to close with keywords).
+    #     Bare modification imperatives are genuinely ambiguous as a
+    #     *first* message; keyword-forcing them would misroute partial
+    #     new-problem inputs into the no-baseline guide
+    #     (_analysis_needs_baseline, core.py). Correct to defer. ---
     ("drop P2 capacity by 20%", ESCALATE),
     ("bump Boston up to 1500", ESCALATE),
-    ("how sensitive is the plan to freight", ESCALATE),  # 'sensitive' != 'sensitivity'
-    ("what changes if I add a plant", ESCALATE),         # not "what if"
 ]
 
 
@@ -351,10 +361,12 @@ def test_keyword_layer_coverage_is_tracked():
     silently drift without us noticing."""
     intent_escalate = sum(1 for _, _, e in INTENT_MATRIX if e == ESCALATE)
     analysis_escalate = sum(1 for _, e in ANALYSIS_MATRIX if e == ESCALATE)
-    # Current catalogue: 3/16 intent and 4/13 analysis-type phrasings punt
-    # to the LLM. That ~20-30% miss rate on the *free* keyword layer is
-    # the data point for the "add another model?" call: it is a prompt /
-    # keyword-coverage gap, not a reasoning gap — cheaper to close before
-    # adding a model.
+    # Post routing-fix catalogue: the free keyword layer now resolves all
+    # but the genuinely-ambiguous cases. The 3 remaining intent escalations
+    # are first-message-no-context (correctly deferred); the 2 analysis
+    # escalations are bare modification imperatives DELIBERATELY left to
+    # the LLM (keyword-forcing them risks first-message misroute). That
+    # this floor is small + principled — not "we need a bigger model" —
+    # is the answer to the model question, kept as a drift tripwire.
     assert intent_escalate == 3
-    assert analysis_escalate == 4
+    assert analysis_escalate == 2

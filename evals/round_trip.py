@@ -106,6 +106,7 @@ def run_one(
     llm_client,
     gap_threshold: float = 0.01,
     domain: str = "transport",
+    style: str = "neutral",
 ) -> RoundTripResult:
     """Run a single round-trip for one seed.
 
@@ -115,6 +116,9 @@ def run_one(
         llm_client: an EnhancedLLMClient (verbalizer uses its reasoning model).
         gap_threshold: objective gap above which we bucket as 'objective_mismatch'.
         domain: "transport" or "scheduling".
+        style: verbalizer style — "neutral" (default) or "noisy"
+            (deterministic typo/punctuation/article-drop injection for the
+            Phase-C robustness-to-noise metric).
     """
     if domain not in _DOMAINS:
         raise ValueError(f"Unknown domain {domain!r}; expected one of {list(_DOMAINS)}")
@@ -149,7 +153,8 @@ def run_one(
     try:
         text, dt = _timed(
             verbalize, params, llm_client,
-            cache_key=f"seed:{seed}:style:neutral",
+            cache_key=f"seed:{seed}:style:{style}",
+            style=style,
             domain=domain,
         )
         latencies["verbalize"] = dt

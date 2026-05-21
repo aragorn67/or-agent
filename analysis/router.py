@@ -104,12 +104,20 @@ def detect_analysis_type_keyword_based(query: str) -> str:
     """
     query_lower = query.lower()
 
-    # Sensitivity analysis
-    if any(kw in query_lower for kw in ['sensitivity', 'impact', 'effect']):
+    # Sensitivity analysis. 'sensitiv' covers "sensitivity" AND "sensitive"
+    # ("how sensitive is X to Y"); "how does X affect" / "responsive to"
+    # are the other common sensitivity phrasings the rigid list missed.
+    if any(kw in query_lower for kw in
+           ['sensitiv', 'impact', 'effect', 'how does', 'responsive to']):
         return 'sensitivity'
 
-    # What-if scenario
-    if any(kw in query_lower for kw in ['what if', 'what-if', 'scenario', 'suppose', 'let\'s see', 'happens if']):
+    # What-if scenario. Added the natural "what changes/happens if/when"
+    # phrasings (the keyword catalogue showed these were punting to the
+    # LLM purely for lack of a trigger substring — not a reasoning gap).
+    if any(kw in query_lower for kw in
+           ['what if', 'what-if', 'scenario', 'suppose', "let's see",
+            'happens if', 'what changes if', 'what happens if',
+            'what happens when', 'happens when']):
         return 'what_if'
 
     # Re-solve with modifications

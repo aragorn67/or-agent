@@ -115,7 +115,12 @@ class IntentRouter:
                 "can you explain", "tell me more", "what if",
                 "change", "modify", "update", "adjust", "increase", "decrease",
                 "sensitivity", "analysis", "plot", "graph", "visualize", "chart", "create",
-                "objective", "goal", "variables", "constraints"
+                "objective", "goal", "variables", "constraints",
+                # Scenario / re-run phrasings the catalogue showed punting
+                # to the LLM. This whole block is gated on
+                # context.last_solution, so broadening here cannot affect
+                # first-message / new-problem routing.
+                "suppose", "imagine", "rerun", "re-run", "redo",
             ]
 
             # If message is short (< 20 words) and has follow-up words, likely follow-up

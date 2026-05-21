@@ -11,14 +11,23 @@ requests
 jsonschema
 
 # ML and Classification (added 2025-10-12)
-numpy==2.3.3
-PyYAML==6.0.3
-scikit-learn==1.7.2
-scipy==1.16.2
+# Ranges, not hard pins: numpy==2.3.x / scipy==1.16.x require Python >=3.11
+# and have no Windows wheels for 3.10, which broke setup.bat (it advertises
+# "Python 3.10 or higher"). These ranges let pip pick a wheel matching the
+# installed Python on 3.10 / 3.11 / 3.12.
+numpy>=1.26,<3
+PyYAML>=6.0,<7
+scikit-learn>=1.4,<2     # only used by the dormant or_classify subsystem
+scipy>=1.11,<2           # only used by the dormant or_classify subsystem
 
-# RAG System (added 2025-11-08)
-langchain==0.3.7
-langchain-community==0.3.7
-chromadb==0.5.20
-pypdf==5.1.0
-sentence-transformers==3.3.1
+# RAG System (added 2025-11-08) - OPTIONAL.
+# The RAG subsystem lives in ML_RAG_archive/ and is not on the production
+# code path (verified: no imports outside the archive/tests). These wheels
+# (chromadb, sentence-transformers) are heavy and frequently fail to build
+# on Windows, which aborted the whole setup. Uncomment only if you need the
+# archived RAG experiments.
+# langchain==0.3.7
+# langchain-community==0.3.7
+# chromadb==0.5.20
+# pypdf==5.1.0
+# sentence-transformers==3.3.1

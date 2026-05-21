@@ -67,19 +67,19 @@ if %errorlevel% neq 0 (
     echo Please install it from: https://ollama.ai
     echo.
     echo After installing Ollama, run:
-    echo   ollama pull qwen3:14b
+    echo   ollama pull qwen3:8b
     echo.
 ) else (
     echo Ollama found!
     echo.
     echo Checking for required model...
-    ollama list | findstr "qwen3:14b" >nul 2>&1
+    ollama list | findstr "qwen3:8b" >nul 2>&1
     if %errorlevel% neq 0 (
-        echo Model qwen3:14b not found. Downloading...
-        echo This will download about 9.3GB - may take several minutes
-        ollama pull qwen3:14b
+        echo Model qwen3:8b not found. Downloading...
+        echo This will download about 5.2GB - may take several minutes
+        ollama pull qwen3:8b
     ) else (
-        echo Model qwen3:14b already installed!
+        echo Model qwen3:8b already installed!
     )
 )
 echo.

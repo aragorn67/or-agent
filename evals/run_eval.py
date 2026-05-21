@@ -16,7 +16,7 @@ import sys
 import time
 from collections import Counter
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 from .round_trip import RoundTripResult, run_one
 
@@ -95,6 +95,8 @@ def _aggregate(results: List[RoundTripResult], gap_threshold: float, domain: str
 
     bucket_counts = Counter(r.failure_bucket for r in results if r.failure_bucket)
 
+    reliability = _reliability_metrics(results, bucket_counts)
+
     return {
         "n": n,
         "classification_accuracy": classification_hits / n if n else 0.0,
@@ -104,6 +106,79 @@ def _aggregate(results: List[RoundTripResult], gap_threshold: float, domain: str
         "gap_threshold": gap_threshold,
         "stage_latency": latency_stats,
         "failure_histogram": dict(bucket_counts),
+        "reliability": reliability,
+    }
+
+
+def _reliability_metrics(results: List[RoundTripResult],
+                         bucket_counts: Counter) -> dict:
+    """Phase-C named reliability rates, derived from the failure histogram.
+
+    All rates are denominated in **runs that reached their stage** — so the
+    structured-output rate is over runs that got past the generator, the
+    feasibility-preservation rate is over runs whose problem was feasible by
+    construction (i.e., not generator_infeasible).
+
+    Definitions:
+      structured_output_validity_rate
+          1 − (extraction_fail + agent_exception) / runs_reaching_extraction
+          Captures "did the LLM produce a parseable, usable JSON envelope?"
+          (agent_exception is included because the most common exception
+          path through the agent is a JSON-shape mismatch at extraction.)
+
+      classification_validity_rate
+          1 − classification_miss / runs_reaching_classification
+          "Did the classifier return one of the expected labels?"
+
+      feasibility_preservation_rate
+          1 − agent_infeasible / runs_with_feasible_truth
+          "When the ground truth was feasible, did the agent's recovered
+          params also solve as feasible?" A failure here means the agent's
+          extraction drift produced a problem the solver rejected.
+
+      solver_error_rate
+          solver_error / runs_reaching_solver
+          Distinct from feasibility loss — the solver itself raised, not the
+          model being infeasible.
+    """
+    n = len(results)
+    generator_infeasible = bucket_counts.get("generator_infeasible", 0)
+    verbalizer_error = bucket_counts.get("verbalizer_error", 0)
+    classification_miss = bucket_counts.get("classification_miss", 0)
+    extraction_fail = bucket_counts.get("extraction_fail", 0)
+    agent_infeasible = bucket_counts.get("agent_infeasible", 0)
+    solver_error = bucket_counts.get("solver_error", 0)
+    agent_exception = bucket_counts.get("agent_exception", 0)
+
+    runs_reaching_classification = max(0, n - generator_infeasible - verbalizer_error)
+    runs_reaching_extraction = max(0, runs_reaching_classification - classification_miss)
+    runs_reaching_solver = max(0, runs_reaching_extraction - extraction_fail - agent_exception)
+    runs_with_feasible_truth = max(0, n - generator_infeasible)
+
+    def _rate(denom: int, fails: int) -> Optional[float]:
+        if denom <= 0:
+            return None
+        return 1.0 - fails / denom
+
+    return {
+        "structured_output_validity_rate": _rate(
+            runs_reaching_extraction, extraction_fail + agent_exception,
+        ),
+        "classification_validity_rate": _rate(
+            runs_reaching_classification, classification_miss,
+        ),
+        "feasibility_preservation_rate": _rate(
+            runs_with_feasible_truth, agent_infeasible,
+        ),
+        "solver_error_rate": (
+            solver_error / runs_reaching_solver if runs_reaching_solver else None
+        ),
+        "denominators": {
+            "runs_reaching_classification": runs_reaching_classification,
+            "runs_reaching_extraction": runs_reaching_extraction,
+            "runs_reaching_solver": runs_reaching_solver,
+            "runs_with_feasible_truth": runs_with_feasible_truth,
+        },
     }
 
 
@@ -116,6 +191,10 @@ def main(argv=None):
     p.add_argument("--output", type=str, default="", help="Output JSON path (default auto-named)")
     p.add_argument("--backend", type=str, default="ollama", choices=["ollama", "groq"],
                    help="LLM backend (default: ollama). Overrides $LLM_BACKEND.")
+    p.add_argument("--style", type=str, default="neutral", choices=["neutral", "noisy"],
+                   help="Verbalizer style. 'noisy' applies deterministic typo/"
+                        "article-drop/punctuation noise post-hoc (Phase-C "
+                        "robustness-to-noise metric).")
     args = p.parse_args(argv)
 
     # Force the chosen backend before importing the LLM client so shell env
@@ -128,7 +207,7 @@ def main(argv=None):
     seeds = _parse_seeds(args.seeds, args.n)
 
     print(f"[run_eval] domain={args.domain} backend={args.backend} n={len(seeds)} "
-          f"gap_threshold={args.gap_threshold}", flush=True)
+          f"gap_threshold={args.gap_threshold} style={args.style}", flush=True)
 
     llm = EnhancedLLMClient()
     agent = OptimizationAgent(llm)
@@ -137,7 +216,8 @@ def main(argv=None):
     t0 = time.perf_counter()
     for i, seed in enumerate(seeds, 1):
         try:
-            r = run_one(seed, agent, llm, gap_threshold=args.gap_threshold, domain=args.domain)
+            r = run_one(seed, agent, llm, gap_threshold=args.gap_threshold,
+                        domain=args.domain, style=args.style)
         except Exception as e:
             r = RoundTripResult(
                 seed=seed, domain=args.domain, generated_params={},
@@ -151,6 +231,7 @@ def main(argv=None):
     elapsed = time.perf_counter() - t0
     report = {
         "domain": args.domain,
+        "style": args.style,
         "started_at": _dt.datetime.now().isoformat(timespec="seconds"),
         "wall_seconds": elapsed,
         "metrics": _aggregate(results, args.gap_threshold, args.domain),
