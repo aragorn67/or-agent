@@ -213,3 +213,70 @@ def test_endpoint_unsupported_domain_is_422(client):
     r = client.get("/solve/file/template",
                     params={"problem_type": "KNAPSACK"})
     assert r.status_code == 422
+
+
+# ----------------------------------------------- auto-inference (no PT)
+
+def test_infer_transport_from_sheet_names():
+    book = si.build_template("TRANSPORTATION")
+    params = si.parse_workbook(io.BytesIO(book))   # no problem_type
+    assert "plants" in params and "markets" in params
+    assert "capacity" in params and "demand" in params
+
+
+def test_infer_scheduling_from_sheet_names():
+    book = si.build_template("SCHEDULING")
+    params = si.parse_workbook(io.BytesIO(book))   # no problem_type
+    assert "orders" in params and "units" in params
+    assert "processing_time" in params and "due_date" in params
+
+
+def test_infer_ambiguous_workbook_lists_required_sheets():
+    """A workbook with only one transport sheet matches no domain — error
+    must list what each domain needs so the user can fix it."""
+    import pandas as pd
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as xw:
+        pd.DataFrame({"plant": ["P1"], "capacity": [100]}).to_excel(
+            xw, sheet_name="Supply", index=False)
+    buf.seek(0)
+    with pytest.raises(ValueError, match="Cannot infer problem type"):
+        si.parse_workbook(buf)
+
+
+def test_endpoint_infers_when_problem_type_omitted(client):
+    book = si.build_template("TRANSPORTATION")
+    r = client.post(
+        "/solve/file",
+        data={"mode": "exact", "explain": "false"},   # no problem_type
+        files={"file": ("in.xlsx", book,
+                         "application/vnd.openxmlformats-officedocument."
+                         "spreadsheetml.sheet")},
+    )
+    assert r.status_code == 200
+    j = r.json()
+    assert j["success"] is True
+    assert j["problem_type"] == "TRANSPORTATION"
+    assert j["solution"]["objective_value"] == pytest.approx(153675.0)
+
+
+def test_endpoint_inference_ambiguous_is_422_not_500(client):
+    """Workbook that matches no domain returns 422 with an actionable
+    listing — not a 500 and not a generic 'unsupported' message."""
+    import pandas as pd
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as xw:
+        pd.DataFrame({"plant": ["P1"], "capacity": [100]}).to_excel(
+            xw, sheet_name="Supply", index=False)
+    r = client.post(
+        "/solve/file",
+        data={"mode": "exact"},                       # no problem_type
+        files={"file": ("in.xlsx", buf.getvalue(),
+                         "application/vnd.openxmlformats-officedocument."
+                         "spreadsheetml.sheet")},
+    )
+    assert r.status_code == 422
+    detail = r.json()["detail"]
+    assert "Cannot infer" in detail
+    assert "transport needs" in detail
+    assert "scheduling needs" in detail

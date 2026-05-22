@@ -231,18 +231,62 @@ def _parse_scheduling(sheets: Dict[str, pd.DataFrame]) -> Dict[str, Any]:
     }
 
 
-def parse_workbook(src: WorkbookSource, problem_type: str) -> Dict[str, Any]:
-    """Parse an input workbook into solver params for ``problem_type``.
+# Required-sheet contracts per domain — used by both the parser and the
+# auto-inference path. Extend here when adding a new domain.
+_DOMAIN_REQUIRED_SHEETS = {
+    "transport":  {"supply", "demand", "cost"},
+    "scheduling": {"processing", "duedate"},
+}
 
-    Returns exactly the dict the NL extractor would have produced, so
-    ``validate_params`` + ``check_feasibility`` + the solver run
+
+def infer_domain(sheets: Dict[str, pd.DataFrame]) -> str:
+    """Pick the domain whose required sheets are all present.
+
+    Raises ``ValueError`` with an actionable listing when the workbook
+    matches neither domain (or both — overlap is impossible today but
+    guarded against future ambiguity).
+    """
+    present = {s.lower() for s in sheets}
+    matches = [d for d, need in _DOMAIN_REQUIRED_SHEETS.items()
+               if need.issubset(present)]
+    if len(matches) == 1:
+        return matches[0]
+    listing = ", ".join(sorted(present)) or "(none)"
+    if not matches:
+        needs = "; ".join(
+            f"{d} needs {sorted(req)}"
+            for d, req in _DOMAIN_REQUIRED_SHEETS.items()
+        )
+        raise ValueError(
+            f"Cannot infer problem type from workbook sheets [{listing}]. "
+            f"Required sheets: {needs}."
+        )
+    raise ValueError(
+        f"Workbook sheets [{listing}] match multiple domains "
+        f"({', '.join(matches)}); pass problem_type explicitly to disambiguate."
+    )
+
+
+def parse_workbook(src: WorkbookSource,
+                   problem_type: str | None = None) -> Dict[str, Any]:
+    """Parse an input workbook into solver params.
+
+    If ``problem_type`` is ``None``, the domain is inferred from sheet
+    names. Returns exactly the dict the NL extractor would have produced,
+    so ``validate_params`` + ``check_feasibility`` + the solver run
     unchanged. Raises ``ValueError`` (never 500s) on any malformed input.
     """
-    domain = domain_of(problem_type)
     sheets = _read_book(src)
+    domain = domain_of(problem_type) if problem_type else infer_domain(sheets)
     if domain == "transport":
         return _parse_transport(sheets)
     return _parse_scheduling(sheets)
+
+
+def resolved_ids_from_domain(domain: str) -> Tuple[str, str]:
+    """Like ``resolved_ids`` but takes the already-resolved domain name
+    so the auto-inference path doesn't need a synthetic problem_type."""
+    return _RESOLVED[domain]
 
 
 def build_template(problem_type: str) -> bytes:

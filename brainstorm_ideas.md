@@ -57,60 +57,63 @@ not synthesise. (memory: `project_design_thesis`)
   phrasings over the two keyword routers) that catalogued LLM-escalation
   rate → decided *not* to add a second model (misses are keyword-coverage
   gaps, not reasoning gaps). (ANALYSIS 2026-05-19.)
+- **Eval hardening block — DONE 2026-05-21.** Phase 3 metamorphic
+  invariants (50 tests), Phase 4 paraphrase holdout (10-style runner +
+  agreement metric), Metric C named reliability rates (4 rates + `noisy`
+  verbalizer style), and adversarial extraction characterisation (8
+  transforms × should_solve/graceful_degrade × 4-way outcome classifier).
+  Live validation surfaced a real bug (transport coverage-gate
+  asymmetry — capacity/demand weren't number-checked, fixed; cache
+  bumped v5→v6) and a structural finding (single-stage IPM SeqCount
+  can't represent an unused unit; test uses the dual). Adversarial run
+  on 12 transport cases: zero hallucinations, zero hard failures;
+  silent-contradiction-handling flagged as a future feature. Suite
+  248→329. (ANALYSIS 2026-05-21.)
 
 ---
 
 ## Open backlog (priority order)
 
-### 1. Eval hardening — IN PROGRESS (active task) 🟠
-
-> **▶ RESUME HERE (2026-05-19 EOD).** Done so far: the routing keyword
-> fix (last bullet). **Remaining: Phase 3 metamorphic → Phase 4 paraphrase
-> holdout → Metric C** (in that order; Phase 3 is the recommended next —
-> deterministic, no LLM, no new ground truth). **Do NOT commit until ALL
-> of this section is finished** (user's call — one commit for the whole
-> Eval-Hardening block). Uncommitted so far this block:
-> `analysis/router.py`, `llm/intent_router.py`,
-> `tests/test_chat_roundtrip.py`, `ANALYSIS.md`, `brainstorm_ideas.md`,
-> + memory. Suite green at **248 passed** (same documented pre-existing
-> 2 fails / 3 errors baseline — `us_manufacturing`, stale `LLMConfig`
-> assert, Groq-429/ML). Resume detail also in memory
-> `project_session_2026_05_14`.
-
-- **Phase 3 — metamorphic transforms:** double all costs → objective
-  doubles; permute plant order → objective unchanged; add unused plant →
-  unchanged. Invariant assertions, no new ground truth (~0.5 day).
-- **Phase 4 — paraphrase holdout:** LLM-paraphrase the 27-problem seed set
-  10×, run the pipeline, treat the original 27 as a human-curated holdout
-  to measure the synthetic-vs-real gap.
-- **C. Named reliability metrics:** structured-output-validity rate (LLM
-  JSON parse success), constraint-violation rate, and robustness-to-noise
-  (activate the verbalizer's existing unused `'noisy'` style knob). High
-  signal for Applied-Scientist framing; the harness already aggregates
-  per-stage data, these are mostly new aggregations.
-- **More synthetic families + adversarial extraction (new 2026-05-21):**
-  expand the verbalizer beyond the current two domains' core templates;
-  add adversarial extraction cases — malformed/ambiguous prose, missing
-  units, contradictory statements. Reports parameter-recall + objective-gap
-  per stage. Extends Phase 4's "synthetic-vs-real gap" framing.
-- **Cheaper-than-a-model routing fix — DONE 2026-05-19.** Broadened
-  both LLM-free routers for the safe phrase-based gaps ("sensitive",
-  "what changes/happens if", context-gated suppose/rerun); deliberately
-  left bare modification imperatives to the LLM (first-message
-  misroute risk). Matrix re-measured: analysis escalations 4→2
-  (principled), zero regressions, no new model. (ANALYSIS 2026-05-19.)
-  *Optional later:* few-shot the existing model for the residual 2 if
-  they ever matter — but they're a correct boundary, not a gap.
-
-### 2. Real-data benchmark 🟠
+### 1. Real-data benchmark 🟠 ◀ active
 
 20–30 hand-curated real OR problems (transport + scheduling), run through
 the pipeline, report parameter-recall / objective-gap / failure-modes
 alongside the synthetic round-trip numbers. Directly answers the "n=10
-is small / synthetic-only" critique. Biggest credibility win once #1
-ships its metrics.
+is small / synthetic-only" critique. Biggest credibility win after the
+eval-hardening block.
 
-### 3. Third problem family 🟠
+**Concrete plan (decided 2026-05-21):**
+
+- **Where they live:** add to the existing `tests/or_problem_repository.py`
+  (41 problems already there with full schema + helpers + test integration).
+  Don't create a parallel structure.
+- **Mix:** ~5 textbook (Winston / Hillier-Lieberman / Wolsey — published
+  optima, easy to score) + ~5 case-study (INFORMS Edelman abstracts /
+  OR-Society writeups / public RFPs — high realism, often no
+  machine-checkable optimum, score on what's available). Defer
+  OR-Library/NETLIB (numeric-only, no real prose — defeats the point).
+- **Per-problem extras the runner needs** (on top of the existing
+  fields — text, expected_type, expected_schema, feasible, solvable):
+  - `metadata.tags`: include `"real_data_benchmark"` so the runner can
+    filter on this without touching the existing 41 problems.
+  - `metadata.source`: citation string ("Winston OR, Ch.7, Example 1").
+  - `ground_truth_params`: the numeric instance we expect the extractor
+    to recover (for `param_recall`). Optional — leave out if a case
+    study doesn't have machine-checkable numerics; runner reports recall
+    N/A for that problem.
+  - `published_optimum`: float — what we score `objective_gap` against.
+    Optional for the same reason.
+- **Workflow:** user sources + pastes problems into the repo file.
+  Once 3–5 are in, build a runner under `evals/` that loads
+  tag=`real_data_benchmark`, pipes each through the agent, and produces
+  the same reliability metrics + bucket histogram + gap stats the
+  synthetic round-trip already emits — so the two reports are
+  side-by-side comparable.
+- **Expected numbers:** *not* 3/3 / recall 1.0 / gap 0.0. Real instances
+  are bigger and messier — expect "recall ~0.8, obj-gap median ~5%" and
+  a non-trivial failure histogram. That's the interview answer.
+
+### 2. Third problem family 🟠
 
 Multi-period or multi-commodity flow (or a third single-stage variant if
 those are too heavy). Tests generalisation of the `FeasibilityPlugin`
@@ -118,7 +121,7 @@ contract and the registry/composer wiring. Gives a concrete "here's how
 I extended the architecture" story; doubles as a stress test of the
 domain-general fail-closed gate.
 
-### 4. Consolidated problem formulation (Overview-PDF expansion)
+### 3. Consolidated problem formulation (Overview-PDF expansion)
 
 Objective / constraints / assumptions / failure-cases for the transport
 LP-MIP and the scheduling IPM in one place (code already has the
@@ -126,39 +129,40 @@ numbered constraints; §4 covers transport, §7 the gate). Items A
 (curated infeasible corpus) and B (Baseline-vs-system +
 Failure-analysis surfacing) of this checklist are DONE (see Shipped).
 
-### 5. Confidence / disagreement surfacing
+### 4. Confidence / disagreement surfacing
 
 When the voting classifier splits, show it in-UI. Turns ambiguity into
 a feature, not a hidden failure. Cheap to ship — the voter already
 returns per-voter labels; just expose the disagreement when it's
 non-unanimous.
 
-### 6. Web UI (clean front-end)
+### 5. Web UI (clean front-end)
 
 Replace the terminal-first interaction with a real web front-end on top
 of the existing job/poll pipeline UI. The pipeline streams stage events
 already; this is presentation, not new backend.
 
-### 7. Persistent REST deployment
+### 6. Persistent REST deployment
 
 The previous cloudflared quick tunnel is shipped but de-prioritized
 and ephemeral. Persistent REST API + stable URL → "try it here" works
-without a co-located laptop. Pair with #6 for full external access.
+without a co-located laptop. Pair with #5 (Web UI) for full external access.
 
-### 8. Cost / ROI framing in-app
+### 7. Cost / ROI framing in-app
 
 Surface "this solve would take a consultant ~X hours / ~$Y" next to
 each result, parameterized by problem size. Pure UX/marketing layer
 over numbers the solver already produces.
 
-### 9. Pick one vertical and go deep
+### 8. Pick one vertical and go deep
 
 Strategic, not engineering: choose a concrete buyer (logistics? supply
 chain?) and make *one* end-to-end workflow excellent (data ingest →
 formulation → solve → explanation → export) rather than many shallow.
-Decision gate before #6/#7/#8 turn into generic effort.
+Decision gate before #5/#6/#7 (Web UI / Persistent REST / Cost-ROI)
+turn into generic effort.
 
-### 10. Agentic frontier — on-thesis only
+### 9. Agentic frontier — on-thesis only
 
 Both are real "remove the hard ceiling" items; both stay inside the
 validated-model envelope.
@@ -174,7 +178,7 @@ validated-model envelope.
   toggleable constraints of the already-selected model*. Tripwire: repair
   needing a structurally different model → escalate, don't reformulate.
 
-### 11. Longer-term architecture (aspirational, unblocked but not urgent)
+### 10. Longer-term architecture (aspirational, unblocked but not urgent)
 
 - **Data layer beyond the xlsx fast path:** general CSV/Excel/long-vs-wide
   loaders + schema inference + LLM-assisted ambiguous-column mapping.

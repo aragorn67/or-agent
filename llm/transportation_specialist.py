@@ -57,7 +57,7 @@ EXTRACTION RULES:
 8. **CRITICAL: When extracting arc_capacity, include ALL routes mentioned, even if capacity is 0! A capacity of 0 means that route is blocked. Missing entries will be treated as infinite capacity!**
 8b. **If a fixed/setup charge is mentioned for opening or using a route, extract fixed_cost for EVERY plant×market route. If one flat number applies to all routes, repeat it for each pair. Omit fixed_cost entirely if no fixed charge is mentioned (keeps the problem a pure LP).**
 9. **If cost values are not specified or text says "values not important", use $1 per unit for all routes**
-10. **CRITICAL: ALWAYS extract all available data. If something looks wrong (negative capacity, missing data), extract what you can AND add an "error" field describing the issue. DO NOT return error-only JSON**
+10. **CRITICAL: ALWAYS extract all available data. If a value is non-numeric, negative, or the prose explicitly contradicts what you extracted (e.g. user said "3 plants" but only 2 names appear), extract what you can AND add an "error" field describing the **extraction problem**. Do NOT flag feasibility issues (total supply vs demand, blocked arcs, arc-capacity patterns) — a separate feasibility gate handles those. DO NOT return error-only JSON.**
 11. All numbers must be numeric LITERALS, not strings and not expressions.
     Do the arithmetic yourself: write the evaluated number (e.g. 225), never
     write `90 * 2.5` or `90*2.5` in the JSON. JSON does not allow expressions.

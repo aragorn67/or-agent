@@ -250,12 +250,35 @@ class OptimizationAgent:
             example_params = solver.get_example_params()
             params = self.llm.extract_parameters(description, problem_type, example_params)
 
-            # Check if LLM extraction failed
+            # Extractor surfaced a concern. Two cases worth separating:
+            #
+            # 1. Genuine extraction failure (malformed JSON, missing required
+            #    fields, prose vs. extracted mismatch) — the params dict isn't
+            #    usable. Keep the conversational baseline guide / "provide more
+            #    info" surface.
+            # 2. The LLM disobeyed the prompt and self-attached a feasibility
+            #    note (e.g. supply < demand) while still extracting a complete
+            #    params dict. In that case the **feasibility gate is the
+            #    authoritative source of truth** — strip the note and route
+            #    through solve_with_params so the user gets a proper
+            #    `status='infeasible'` + `layer_failed` + actionable reasons,
+            #    not the useless "Parameter extraction failed" headline.
             if "error" in params:
-                # Most common cause of a first-message extraction failure is a
-                # what-if with no underlying problem to extract from. Answer
-                # with the baseline guide rather than a structural-infeasible
-                # error the user can't act on.
+                llm_note = params.pop("error")
+                validation_errors = solver.validate_params(params)
+                if not validation_errors:
+                    return self.solve_with_params(
+                        params=params,
+                        problem_type=problem_type,
+                        solver_id=solver_id,
+                        description=description,
+                        mode=mode,
+                        classification=classification,
+                        conversation_context=conversation_context,
+                        progress_callback=progress_callback,
+                        explain=True,
+                    )
+
                 guide = self._analysis_needs_baseline(
                     description, conversation_context, allow_data_rich=True
                 )
@@ -263,12 +286,12 @@ class OptimizationAgent:
                     return guide
                 return {
                     "success": False,
-                    "status": "infeasible",  # Extraction failure = structural infeasibility
-                    "error": "Parameter extraction failed",
-                    "details": [params["error"]],
+                    "status": "infeasible",
+                    "error": "Parameter validation failed",
+                    "details": validation_errors + [f"(extractor note: {llm_note})"],
                     "problem_type": problem_type,
                     "confidence": confidence,
-                    "extracted_params": params,  # Include partial params (may only contain 'error')
+                    "extracted_params": params,
                     "suggestion": "Please provide complete information including all factory names, capacities, customer names, demands, and distances between all factories and customers."
                 }
 

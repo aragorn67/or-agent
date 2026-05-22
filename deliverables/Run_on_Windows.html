@@ -32,8 +32,8 @@
 <tr><td>Windows 10 / 11 (64-bit)</td><td>&nbsp;</td></tr>
 <tr><td>Python 3.10&ndash;3.12</td><td>From <code>python.org</code> &mdash; tick <strong>"Add Python to PATH"</strong> during install.</td></tr>
 <tr><td>Ollama for Windows</td><td>From <code>https://ollama.com/download</code>. Runs the local LLM.</td></tr>
-<tr><td>~15 GB free disk</td><td>The <code>qwen3:14b</code> model is ~9.3 GB.</td></tr>
-<tr><td>~16 GB RAM recommended</td><td>Model runs in RAM on CPU; a GPU is optional but much faster.</td></tr>
+<tr><td>~10 GB free disk</td><td>The <code>qwen3:8b</code> model is ~5.2 GB; Python + venv + wheels add ~2 GB.</td></tr>
+<tr><td>~8 GB RAM recommended</td><td>Model runs in RAM on CPU; a GPU is optional but much faster.</td></tr>
 </table>
 
 <div class="ok"><strong>Good news vs. the old instructions:</strong> you do
@@ -45,7 +45,7 @@ steps in the old <code>setup.bat</code> &mdash; this guide supersedes them.</div
 <h2>Setup (one time)</h2>
 <ol>
 <li><strong>Install Ollama</strong>, then in a terminal pull the model:
-<pre>ollama pull qwen3:14b</pre>
+<pre>ollama pull qwen3:8b</pre>
 Leave Ollama running (it auto-starts as a background service on Windows).</li>
 
 <li><strong>Get the project</strong> and open a Command Prompt in its folder
@@ -67,7 +67,7 @@ uvicorn api:app --host 127.0.0.1 --port 8000</pre>
 two built-in examples and press solve.</p>
 
 <div class="warn"><strong>First answer is slow.</strong> The first query loads
-<code>qwen3:14b</code> into memory and runs ~2&ndash;3 minutes of local inference on
+<code>qwen3:8b</code> into memory and runs ~2&ndash;3 minutes of local inference on
 CPU (faster with a GPU). This is normal &mdash; it is the LLM thinking, not a hang.
 Subsequent queries are quicker because the model stays warm. To pre-warm before
 a demo, run any prompt once and wait for it to finish.</div>
@@ -91,15 +91,17 @@ creative temperature) &mdash; the numbers, flows, and routing decision do not ch
 <table>
 <tr><th>Symptom</th><th>Fix</th></tr>
 <tr><td>"Ollama not running" / connection refused</td><td>Open the Ollama app, or run <code>ollama serve</code> in a separate terminal.</td></tr>
-<tr><td>Empty / instant <code>{}</code> from the model</td><td>Confirm the model is <code>qwen3:14b</code> (<code>ollama list</code>). Do not substitute a different model.</td></tr>
+<tr><td>Empty / instant <code>{}</code> from the model</td><td>Confirm the model is <code>qwen3:8b</code> (<code>ollama list</code>). Do not substitute a different model.</td></tr>
 <tr><td><code>uvicorn</code> not found</td><td>The venv is not activated &mdash; run <code>Tolis_Env\Scripts\activate.bat</code> first.</td></tr>
 <tr><td>Port 8000 already in use</td><td>Use <code>--port 8765</code> and open that port instead.</td></tr>
-<tr><td>Very slow / out of memory</td><td>Close other apps; 14B model needs ~10 GB free RAM. A CUDA GPU speeds it up dramatically.</td></tr>
+<tr><td>Very slow / out of memory</td><td>Close other apps; the 8B model needs ~6 GB free RAM. A CUDA GPU speeds it up dramatically.</td></tr>
 </table>
 
 <p class="foot">Optimization-AI &mdash; Windows run guide. Expected values verified
-by direct solver run on 2026-05-16. <code>LLM_BACKEND=ollama</code> keeps
-everything local; no API key and no internet needed after the model is pulled.</p>
+by direct solver run on 2026-05-22. <code>LLM_BACKEND=ollama</code> keeps
+everything local; no API key and no internet needed after the model is pulled.
+Default model switched from <code>qwen3:14b</code> to <code>qwen3:8b</code> on 2026-05-17
+(model-sweep benchmark: same accuracy on both transport + scheduling test sets, ~2&times; faster).</p>
 
 </body>
 </html>

@@ -229,7 +229,7 @@ def solve_file_template(problem_type: str = Query(...)):
 
 @app.post("/solve/file")
 async def solve_file(
-    problem_type: str = Form(...),
+    problem_type: str | None = Form(None),
     mode: str = Form("exact"),
     explain: bool = Form(False),
     file: UploadFile = File(...),
@@ -237,7 +237,9 @@ async def solve_file(
     """Phase 3 #2: structured .xlsx upload -> solve, skipping BOTH qwen3
     calls (classify + extract). The "instant demo lane".
 
-    The spreadsheet supplies params directly; everything after
+    ``problem_type`` is optional — when omitted, the domain is inferred
+    from the workbook's sheet names (Supply/Demand/Cost -> transport;
+    Processing/DueDate -> scheduling). Everything after
     (validate -> feasibility -> mode-route -> solve) is the exact shared
     pipeline the NL path uses. ``explain=False`` (default) also skips the
     third qwen3 call, using a deterministic summary instead.
@@ -246,10 +248,14 @@ async def solve_file(
     if not raw:
         raise HTTPException(status_code=422, detail="Uploaded file is empty.")
     try:
-        params = sheet_input.parse_workbook(io.BytesIO(raw), problem_type)
-        resolved_type, solver_id = sheet_input.resolved_ids(problem_type)
+        sheets = sheet_input._read_book(io.BytesIO(raw))
+        domain = (sheet_input.domain_of(problem_type) if problem_type
+                  else sheet_input.infer_domain(sheets))
+        params = (sheet_input._parse_transport(sheets) if domain == "transport"
+                  else sheet_input._parse_scheduling(sheets))
+        resolved_type, solver_id = sheet_input.resolved_ids_from_domain(domain)
     except ValueError as exc:
-        # Malformed workbook / unsupported domain — never a 500.
+        # Malformed workbook / unsupported domain / ambiguous — never a 500.
         raise HTTPException(status_code=422, detail=str(exc))
 
     result = agent.solve_with_params(

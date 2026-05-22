@@ -97,6 +97,8 @@
       <button class="tbtn" type="button" data-act="help">❓ Help</button>
       <button class="tbtn" type="button" data-act="ex0">💼 Transport example</button>
       <button class="tbtn" type="button" data-act="ex1">🏭 Fixed-charge example</button>
+      <button class="tbtn" type="button" data-act="upload">📎 Upload .xlsx</button>
+      <input type="file" id="fileInput" accept=".xlsx" style="display:none">
     </div>
 
     <div class="inputbar">
@@ -145,6 +147,62 @@ toolbar.addEventListener('click', e => {
   if (act === 'help') { input.value = 'help'; send(); return; }
   if (act === 'ex0')  return useExample(0);
   if (act === 'ex1')  return useExample(1);
+  if (act === 'upload') return triggerUpload();
+});
+
+const fileInput = document.getElementById('fileInput');
+
+function triggerUpload() {
+  fileInput.value = '';   // allow re-uploading the same file
+  fileInput.click();
+}
+
+fileInput.addEventListener('change', async () => {
+  const f = fileInput.files && fileInput.files[0];
+  if (!f) return;
+
+  addMsg(`📎 Uploading ${f.name}…`, 'user');
+  sendBtn.disabled = true; input.disabled = true;
+  startTyping('Solving from spreadsheet…');
+
+  try {
+    const fd = new FormData();
+    // problem_type omitted on purpose — server infers domain from sheet names.
+    fd.append('mode', 'exact');
+    fd.append('explain', 'false');
+    fd.append('file', f);
+
+    const r = await fetch('/solve/file', { method: 'POST', body: fd });
+    const d = await r.json();
+    stopTyping();
+
+    if (!r.ok || !d.success) {
+      const detail = String(d.detail || errText(d) || 'Upload failed');
+      addMsg(`❌ ${detail}`, 'agent');
+      showChips(d);
+    } else {
+      const s = d.solution || {};
+      const gap = s.gap != null ? (s.gap*100).toFixed(6)+'%' : 'n/a';
+      const rows = [
+        ['Input', 'spreadsheet (LLM bypassed)'],
+        ['Problem type', d.problem_type || '—'],
+        ['Status', s.status || '—'],
+        ['Objective', s.objective_value != null
+            ? Number(s.objective_value).toLocaleString() : '—'],
+        ['Gap', gap],
+      ];
+      if (d.skipped_stages) rows.push(['Skipped stages', d.skipped_stages.join(', ')]);
+      addMsg(d.summary || '✅ Solved from spreadsheet.', 'agent', [ card(rows) ]);
+      jobId = null;
+      lastPayload = d;
+      autoRenderTable();
+      showChips(d);
+    }
+  } catch (e) {
+    stopTyping();
+    addMsg('❌ Upload error: ' + e.message, 'agent');
+  }
+  sendBtn.disabled = false; input.disabled = false; input.focus();
 });
 
 function useExample(i){
