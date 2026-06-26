@@ -3,27 +3,95 @@
 Forward plan for Optimization-AI. **Tasks only — no results, no analysis, no
 "shipped" log.** Completed work lives in `git log` and `ANALYSIS.md`.
 
-**Governing thesis (constrains every task below):** the LLM routes to
-*published / validated* OR models and builds on them; it never invents the
-formulation. Tripwire: any task that needs a model not in the solver
+**Strategic pivot (2026-06-26): safety artifact, not OR tool.** The project is
+being repositioned from "better OR tool" toward an "AI-safety-relevant artifact"
+— calibration, knowing-when-not-to-answer, eval validity, contradiction
+handling. **Tier 1/2 below are the new priorities; the former OR-feature roadmap
+is parked in Tier 3 ("resist").** Anchors in [[feedback_evals_are_synthetic]].
+
+**Governing thesis (still holds):** the LLM routes to *published / validated* OR
+models and never invents the formulation. The Tier-1 work is a **meta layer**
+(confidence, abstention, consistency) — it does not touch the math, so the
+thesis is intact. Tripwire unchanged: any task needing a model not in the solver
 registry → stop and tell the user, do not synthesise.
 
 ---
 
-## Priority list
+## ⚠️ OPEN DECISIONS — resolve at the START of next session
 
-1. Large-scale OR problems via xlsx
-2. Third problem family (multi-period or multi-commodity flow)
-3. Consolidated problem formulation in Overview PDF
-4. Confidence / disagreement surfacing in UI
-5. Web UI (clean front-end)
-6. Persistent REST deployment
-7. Cost / ROI framing in-app
-8. Pick one vertical and go deep (strategic gate before #5/#6/#7)
-9. Agentic frontier — multi-stage decomposition + autonomous infeasibility repair
-10. VNS heuristic layer + whitelist constraint-template translation *(blocked on real-data benchmark)*
+Raised 2026-06-26, deferred. Answer these four before building:
 
-### Quick wins (anytime, low-risk)
+1. **GitLab scope.** Learning exercise only (mirror + see how CI works), or the
+   primary home for the safety-eval pipeline? Do you already have a gitlab.com
+   account/project, or is creating one part of the learning?
+   - *Context:* shared runners have no GPU/Ollama, so only the **deterministic**
+     checks (pytest, solver ground-truth, gate-logic units, repo validator) run
+     there. The LLM-dependent eval needs a **self-hosted runner** (your machine)
+     — itself the most instructive GitLab piece. To start I need a GitLab project
+     URL (you create it; I can't).
+2. **Build vs plan.** Start *building* a Tier-1 capability this session, or keep
+   mapping/sequencing so the build happens later (possibly away from the machine)?
+3. **Machine availability.** Calibration measurement + a GitLab self-hosted
+   runner need the machine + Ollama; the methodology writeup + agenda work don't.
+   Which stretches are at-machine vs no-machine? (May join from Windows.)
+4. **Agenda parking.** OK to park ~8 of the 10 former priorities as Tier-3
+   "resist", or keep any live — e.g. the one legit "new family *purely as an
+   eval-generalisation probe*"?
+
+**Recommended start (mine):** Tier-1 **#1 + #3 together** — they share the same
+57-problem correctness labels (the calibration harness *is* the eval-validity
+harness, built once). Lowest-risk: instruments the N-vote voting that already
+exists, no new capability required.
+
+---
+
+## Tier 1 — Priority (safety capabilities that compound)
+
+1. **Calibration layer + measurement.** Turn the classifier's existing N-vote
+   majority distribution into a confidence score; add a verbalised-confidence
+   step to the extractor; measure calibration (ECE, Brier, reliability diagram)
+   against actual correctness across the 57-problem set. The first increment of
+   the calibration project, on a system already known cold. *Absorbs the former
+   "confidence / disagreement surfacing in UI" task.*
+2. **Selective prediction / abstention.** Use those confidences to make the agent
+   abstain or escalate when it is likely wrong; plot the risk–coverage curve.
+   "Knowing when not to answer" is a genuine safety capability and a clean result
+   to show.
+3. **Eval-validity / distribution shift.** Quantify the gap between
+   synthetic-eval performance and the held-out textbook set — i.e. how much the
+   system's *own* evaluation over-estimates real performance. A finding about
+   *when evals lie* is far more safety-relevant than another solver. Builds on
+   [[feedback_evals_are_synthetic]] + today's hardened 57-problem gate (the
+   ground-truth labels it measures against).
+4. **Contradiction-aware extraction.** Detect mutually inconsistent constraints
+   and fail closed rather than silently resolving them — directly the "don't emit
+   confident wrong answers" muscle, applied at extraction time. (The named gap.)
+
+## Tier 2 — Communication & legibility
+
+- **Methodology writeup** *(no machine needed — pure thinking/writing; doable in
+  the next ~2 weeks)*: "catching confidently-wrong outputs in agentic tool-use
+  systems," with the OR agent as the case study. Highest communication leverage
+  of anything here.
+- **Inspect port of one harness** *(when back at the machine)*: port one eval to
+  the Inspect framework — makes the work legible to AISI-type reviewers and
+  teaches their framework.
+
+## Tier 3 — Resist (former OR-tool roadmap; parked, not deleted)
+
+These make a better OR *tool*, not a better safety *artifact*, and the user is
+not targeting optimisation roles. **Keep parked.** The ONLY legitimate revival is
+adding one new problem family *purely to test whether the eval method generalises
+across domains* — and that is an evaluation task, not a feature.
+
+- Large-scale OR via xlsx · Web UI · Persistent REST / Cloudflare deployment ·
+  Cost/ROI framing · Pick-a-vertical-and-go-deep · VNS heuristic layer +
+  constraint-template whitelist · third problem family · Benders / Dantzig-Wolfe
+  decomposition · CSV/Excel loaders.
+- Original detail retained below under **Tier 3 — parked detail** for if/when the
+  strategy changes.
+
+### Quick wins (still fine anytime, low-risk)
 
 - Flow / Gantt / network visualisation
 - Fuzzy-match entity-name errors ("did you mean 'Seattle'?")
@@ -31,149 +99,101 @@ registry → stop and tell the user, do not synthesise.
 - Constraint-relaxation suggestion on infeasible ("relax demand by 10%?")
 - Move keyword-analysis check ahead of `detect_intent` (bare what-if becomes fully LLM-free)
 - Quiet the caught Pyomo "No eligible units" log emitted during a *successful* scheduling solve
-- **Prompt for missing numeric parameters instead of failing extraction.** When a problem text describes the *schema* (warehouses/stores/cost matrix) but supplies no actual numbers, the extractor currently returns "Parameter validation failed." Better: the agent should detect "schema described, values missing" and ask the user to supply them (e.g. "I see 3 warehouses and 5 stores — what are the daily capacities, demands, and unit costs?"). Surfaced by smoke benchmark 2026-05-24 (fresh_food_distribution / steel_supply_construction / wafer_processing_single_stage all match this pattern).
+- **Prompt for missing numeric parameters instead of failing extraction.** When a problem text describes the *schema* (warehouses/stores/cost matrix) but supplies no actual numbers, the extractor returns "Parameter validation failed." Better: detect "schema described, values missing" and ask the user to supply them. Surfaced by smoke benchmark 2026-05-24 (fresh_food_distribution / steel_supply_construction / wafer_processing_single_stage). *(Mildly safety-relevant — graceful elicitation over confident failure.)*
 - **Anchor scheduling's parallel / due-date / makespan features.** Hillier
   12.6-8 only exercises the single-machine changeover objective. The
   parallel-assignment, due-date, and makespan paths have no published-optimum
-  anchor — either find a tiny published instance or enumeration-verify one.
-  Surfaced 2026-06-06.
-- **Smoke benchmark progress visibility — terminal-side.** `evals/smoke_real_data_benchmark.py` now prints a compact `[PROGRESS] N/55 …` line per problem (done 2026-05-24), but it goes to stdout, which is typically redirected to a log file (`> /tmp/smoke_full.log 2>&1`) → terminal stays blank during the 30–60 min run. Fix: write the progress line to `/dev/tty` (or stderr, if user prefers) in addition to stdout, so the terminal shows live status regardless of redirection. Detailed per-problem output stays on stdout (log only). Surfaced 2026-05-24.
+  anchor — find a tiny published instance or enumeration-verify one. *(Feeds
+  Tier-1 #3: more verified labels = tighter eval-validity measurement.)* Surfaced 2026-06-06.
 
 ---
 
 ## Details
 
-### 1. Large-scale OR problems via xlsx
+### Tier 1 — task notes
 
-Industry-scale instances (hundreds of plants/customers, multi-period, real
-cost matrices) fed in as `.xlsx` rather than NL prose — the xlsx fast-path
-already exists and bypasses LLM extraction, so this exercises the *solver*
-side at realistic scale instead of the parser. Pair each with a published
-optimum or a reference solution so `objective_gap` stays meaningful. Good
-sources: public utility / logistics RFPs, INFORMS case-study supplements,
-academic datasets with sheets (e.g. UFLP / CVRP benchmark instances reshaped
-into the `data/examples/` schema).
+Flesh these out as they're picked up. Shared infrastructure: all four measure
+predictions against the 57-problem labelled set in `tests/or_problem_repository.py`
+(10 solvable w/ optima, 47 refuse-path), so build the measurement scaffold once.
 
-### 2. Third problem family
+- **#1 Calibration.** Source signal already exists: `ProblemClassifier` runs
+  `DEFAULT_VOTING_ROUNDS` votes — expose the vote histogram as `p(label)`. Add a
+  verbalised-confidence ask to the extractor (separate from the value extraction).
+  Metrics: ECE (binned), Brier, reliability diagram. Label = did the final
+  objective match the published optimum / did classification route correctly.
+- **#2 Abstention.** Threshold on the #1 confidence → answer / abstain / escalate.
+  Output the risk–coverage curve (accuracy on answered vs fraction answered).
+- **#3 Eval-validity.** Run the synthetic round-trip eval AND the textbook
+  smoke gate, report the delta per metric (classification acc, param recall,
+  objective gap, pass rate). The headline is the *over-estimate*: synthetic minus
+  real.
+- **#4 Contradiction detection.** At extraction, run a cheap consistency pass
+  (e.g. supply<demand already caught by Layer-1; extend to mutually exclusive
+  constraints, impossible due-dates vs processing, over-determined params) and
+  fail closed with the specific contradiction surfaced.
 
-Multi-period or multi-commodity flow (or a third single-stage variant if
-those are too heavy). Tests generalisation of the `FeasibilityPlugin`
-contract and the registry/composer wiring. Gives a concrete "here's how I
-extended the architecture" story; doubles as a stress test of the
-domain-general fail-closed gate.
+### Tier 3 — parked detail
 
-### 3. Consolidated problem formulation (Overview-PDF expansion)
+**Large-scale OR via xlsx.** Industry-scale instances fed as `.xlsx` (xlsx
+fast-path bypasses LLM extraction → exercises the solver at realistic scale).
+Pair each with a published optimum/reference so `objective_gap` stays meaningful.
 
-Objective / constraints / assumptions / failure-cases for the transport
-LP-MIP and the scheduling IPM in one place (code already has the numbered
-constraints; §4 covers transport, §7 the gate).
+**Third problem family.** Multi-period or multi-commodity flow. Tests
+`FeasibilityPlugin` generalisation + registry wiring. *(Only revive as the
+eval-generalisation probe per Tier-3 note.)*
 
-### 4. Confidence / disagreement surfacing
+**Consolidated problem formulation (Overview-PDF expansion).** Objective /
+constraints / assumptions / failure-cases for transport LP-MIP + scheduling IPM
+in one place.
 
-When the voting classifier splits, show it in-UI. Turns ambiguity into a
-feature, not a hidden failure. Cheap to ship — the voter already returns
-per-voter labels; just expose the disagreement when it's non-unanimous.
+**Web UI (clean front-end).** Real web front-end over the existing job/poll
+pipeline. Presentation, not new backend.
 
-### 5. Web UI (clean front-end)
+**Persistent REST deployment.** Stable URL via persistent API (previous
+cloudflared tunnel was ephemeral). Pairs with Web UI.
 
-Replace the terminal-first interaction with a real web front-end on top of
-the existing job/poll pipeline UI. The pipeline streams stage events
-already; this is presentation, not new backend.
+**Cost / ROI framing in-app.** "This solve would take a consultant ~X hrs / ~$Y"
+next to each result. Pure UX/marketing layer.
 
-### 6. Persistent REST deployment
+**Pick one vertical and go deep.** Choose a concrete buyer; make one end-to-end
+workflow excellent. Strategic gate before Web UI / REST / Cost-ROI.
 
-Previous cloudflared quick tunnel was ephemeral. Persistent REST API +
-stable URL → "try it here" works without a co-located laptop. Pair with #5
-(Web UI) for full external access.
+**Agentic frontier — on-thesis only.**
+- *A2 — Multi-stage decomposition (composer over the registry).* Decompose a
+  compound request into a sequence of *existing registered solvers*; LLM chooses
+  order, never writes math. Tripwire: a stage needing an unregistered model →
+  stop.
+- *A3 — Autonomous infeasibility repair (within a known formulation).* Replace
+  the capped 3 retries with an LLM reason→edit→re-check→revise loop over the
+  *parameters / toggleable constraints of the already-selected model*. Tripwire:
+  repair needing a structurally different model → escalate, don't reformulate.
+  *(This slice has the most safety flavour of the Tier-3 set — abstention-adjacent.)*
 
-### 7. Cost / ROI framing in-app
+**VNS + constraint-template whitelist.** *(Blocked on real-data benchmark.)*
+- *A. VNS (Mladenović & Hansen 1997)* as the heuristic layer where VAM/LPT
+  under-perform (fixed-charge transport, scheduling IPM). Problem-specific
+  neighborhood ladders; deterministic descent inside, shake+restart outside.
+  Two-call UX stays; HiGHS still proves the bound. Honest caveat: still heuristic.
+- *B. Whitelist constraint translation (NL → MILP template).* Each solver
+  declares toggleable templates (`forbid_arc`, `force_arc_open`, …); LLM picks
+  template+params from a fixed list; deterministic linearizer instantiates. On
+  no match → stop, never synthesise. Williams ch. 9 boolean-encoding zoo for
+  binary patterns.
 
-Surface "this solve would take a consultant ~X hours / ~$Y" next to each
-result, parameterized by problem size. Pure UX/marketing layer over numbers
-the solver already produces.
-
-### 8. Pick one vertical and go deep
-
-Strategic, not engineering: choose a concrete buyer (logistics? supply
-chain?) and make *one* end-to-end workflow excellent (data ingest →
-formulation → solve → explanation → export) rather than many shallow.
-Decision gate before #5/#6/#7 (Web UI / Persistent REST / Cost-ROI) turn
-into generic effort.
-
-### 9. Agentic frontier — on-thesis only
-
-Both items stay inside the validated-model envelope.
-
-- **A2 — Multi-stage decomposition (composer over the registry).** Decompose
-  a compound request ("design my supply chain") into a sequence of *existing
-  registered solvers* (location → transport → scheduling), wiring each
-  stage's output into the next. The LLM chooses which/what order — never
-  writes math. Tripwire: a stage needing an unregistered model → stop, don't
-  synthesise.
-- **A3 — Autonomous infeasibility repair (within a known formulation).**
-  Replace the capped 3 deterministic retries with an LLM
-  reason→edit→re-check→revise loop proposing edits to the *parameters /
-  toggleable constraints of the already-selected model*. Tripwire: repair
-  needing a structurally different model → escalate, don't reformulate.
-
-### 10. VNS + constraint-template whitelist
-
-**Both blocked on real-data benchmark results** — the benchmark will tell us
-*which* constraint templates users actually want and *whether* the IPM proof
-gap is the real bottleneck VNS would address. Building these speculatively
-risks designing templates / neighborhoods for problems nobody has.
-
-- **A. VNS (Variable Neighborhood Search) as the heuristic layer.**
-  Mladenović & Hansen 1997 — published, validated metaheuristic, on-thesis.
-  Replaces or augments VAM/LPT where the current heuristics under-perform:
-  primarily fixed-charge transport (VAM is fixed-charge-blind) and
-  scheduling IPM (LPT gives a feasible primal but doesn't search around it).
-  Neighborhood ladders are problem-specific (transport: close open route /
-  open closed route / swap pair; scheduling: job-swap-same-machine /
-  move-between-machines / block-reverse / eligible-swap). Local search
-  inside the ladder is deterministic descent; outer loop shakes + restarts.
-  Two-call `heuristic_then_ask` UX stays — VNS gives the immediate feasible
-  answer; HiGHS still proves the bound on the exact solve. Honest caveat:
-  still a heuristic, no optimality proof. Effort: ~1 week per domain.
-
-- **B. Whitelist-based constraint translation (NL → MILP template).**
-  Each registered solver declares a small set of *toggleable constraint
-  templates* (`forbid_arc`, `force_arc_open`, `max_open_routes`,
-  `implication`, etc.). User says "Seattle cannot serve Topeka"; LLM picks
-  the template + params from a fixed list; deterministic linearizer
-  instantiates the constraint and rebuilds the model. On-thesis tripwire: if
-  the LLM can't match a registered template, stop and tell the user — never
-  synthesise a new constraint. Boolean-algebra encoding zoo (Williams ch. 9)
-  for any binary-based pattern: indicator → linear, implication → ≤,
-  exactly-one → =1, etc. Compound expressions (LLM emits a constraint tree,
-  deterministic code linearizes) is the optional second layer — same
-  posture, LLM picks structure, code controls math. Effort: ~2 days per
-  solver + ~1 week for compound expressions.
-
-The two stack: constraint translation tightens the model; VNS searches the
-tightened model heuristically; HiGHS proves the bound. Together they're the
-natural "remove the hard ceiling" pair without violating the thesis.
-
-### 11. Longer-term architecture (aspirational)
-
-- **Data layer beyond the xlsx fast path:** general CSV/Excel/long-vs-wide
-  loaders + schema inference + LLM-assisted ambiguous-column mapping.
-- **Model persistence / warm caching:** cache the compiled Pyomo model,
-  update only changed params for interactive analysis (5–10× on sensitivity
-  sweeps).
-- **Decomposition for industrial scale:** Benders (two-stage), Dantzig-Wolfe
-  (block-diagonal), column generation (VRP / cutting stock). Requires the
-  solver-strategy selector to route by problem size/structure first.
-- **Fixed-charge-aware construction heuristic:** the actual lever the
-  warm-start work identified (VAM is fixed-charge-blind). Also: tighter
-  scheduling formulation (positional/time-indexed) if the IPM proof gap
-  becomes the bottleneck.
+**Longer-term architecture (aspirational).** General CSV/Excel loaders + schema
+inference; compiled-model warm caching (5–10× on sweeps); Benders/Dantzig-Wolfe/
+column-generation for industrial scale; fixed-charge-aware construction
+heuristic; tighter (positional/time-indexed) scheduling formulation.
 
 ---
 
 ## Research framing (CV / publication angle)
 
-LLM-assisted OR (NL → optimal solution with the OR concepts surfaced in
-plain English), adaptive heuristic/decomposition selection, hybrid
-heuristic-exact solving — all consistent with the governing thesis (the LLM
-orchestrates validated solvers; it does not do the math).
+**Primary (post-pivot):** safety-relevant evaluation of agentic tool-use —
+calibration, selective prediction / abstention, eval-validity under distribution
+shift, contradiction-aware fail-closed extraction. "Catching confidently-wrong
+outputs in agentic tool-use systems," OR agent as case study.
+
+**Secondary (the substrate):** LLM-assisted OR (NL → optimal solution with OR
+concepts surfaced in plain English) — consistent with the governing thesis (the
+LLM orchestrates validated solvers; it does not do the math).
