@@ -22,7 +22,7 @@ DEFAULT_VOTING_ROUNDS = 5  # Number of classification votes for consensus (highe
 DEFAULT_SOLVER_BY_TYPE = {
     # Transportation family
     "transportation": "transport_basic_bipartite",
-    "min_cost_flow": "transport_basic_bipartite",  # Fallback until we add true min-cost-flow solver
+    "min_cost_flow": "none",  # Refuse: bipartite transport can't model transshipment/hub conservation — solving it there gives a confidently-wrong answer. Wait for a real min-cost-flow solver.
 
     # Scheduling family - single stage
     "single_stage_scheduling": "single_stage_ipm_scheduling",

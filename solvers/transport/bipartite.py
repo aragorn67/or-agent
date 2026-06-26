@@ -117,6 +117,52 @@ class BipartiteTransportSolver(OptimizationSolver):
             if not isinstance(params["freight"], (int, float)):
                 errors.append("`freight` must be a number")
 
+        # Coverage checks: structural shape passed, but values must actually be
+        # there. Empty/partial dicts pass type checks then crash Pyomo at
+        # build time (KeyError on Param). Catch them here so the feasibility
+        # gate / friendly-error path can surface a real message.
+        plants = params.get("plants") or []
+        markets = params.get("markets") or []
+        capacity = params.get("capacity") or {}
+        demand = params.get("demand") or {}
+
+        if plants:
+            missing_cap = [p for p in plants if p not in capacity]
+            if missing_cap:
+                errors.append(f"`capacity` missing entries for plants: {missing_cap}")
+        if markets:
+            missing_dem = [m for m in markets if m not in demand]
+            if missing_dem:
+                errors.append(f"`demand` missing entries for markets: {missing_dem}")
+
+        if has_cost and plants and markets:
+            cost = params["cost"]
+            missing_pairs = []
+            for p in plants:
+                row = cost.get(p) if isinstance(cost, dict) else None
+                for m in markets:
+                    if isinstance(cost, dict) and (p, m) in cost:
+                        continue
+                    if isinstance(row, dict) and m in row:
+                        continue
+                    missing_pairs.append((p, m))
+            if missing_pairs:
+                errors.append(f"`cost` missing entries for pairs: {missing_pairs[:5]}{'...' if len(missing_pairs) > 5 else ''}")
+
+        if has_distance_freight and plants and markets:
+            distance = params["distance"]
+            missing_pairs = []
+            for p in plants:
+                row = distance.get(p) if isinstance(distance, dict) else None
+                for m in markets:
+                    if isinstance(distance, dict) and (p, m) in distance:
+                        continue
+                    if isinstance(row, dict) and m in row:
+                        continue
+                    missing_pairs.append((p, m))
+            if missing_pairs:
+                errors.append(f"`distance` missing entries for pairs: {missing_pairs[:5]}{'...' if len(missing_pairs) > 5 else ''}")
+
         return errors
 
     def get_example_params(self) -> Dict[str, Any]:

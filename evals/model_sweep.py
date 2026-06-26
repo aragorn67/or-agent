@@ -35,23 +35,20 @@ from typing import Dict, List, Optional
 _ROOT = Path(__file__).resolve().parent.parent
 _ANALYSIS = _ROOT / "ANALYSIS.md"
 
-# A config is just {backend, per-stage model names}. Add a row to compare
-# another model — no code change needed. Ollama models here must be
-# `ollama pull`-ed already; groq rows auto-skip without GROQ_API_KEY.
+# A config is just {per-stage Ollama model names}. Add a row to compare
+# another model — no code change needed. Models must be `ollama pull`-ed already.
 CONFIGS: List[Dict] = [
-    {"name": "baseline", "backend": "ollama",
+    {"name": "baseline",
      "models": ("qwen3:14b", "qwen3:14b", "qwen3:14b")},
-    {"name": "qwen3-8b", "backend": "ollama",
+    {"name": "qwen3-8b",
      "models": ("qwen3:8b", "qwen3:8b", "qwen3:8b")},
-    {"name": "qwen2.5-7b", "backend": "ollama",
+    {"name": "qwen2.5-7b",
      "models": ("qwen2.5:7b-instruct",) * 3},
     # "small classifier, strong instruct extractor" hypothesis.
-    {"name": "qwen2.5-extract", "backend": "ollama",
+    {"name": "qwen2.5-extract",
      "models": ("qwen3:8b", "qwen2.5:7b-instruct", "qwen3:8b")},
-    {"name": "mistral-7b", "backend": "ollama",
+    {"name": "mistral-7b",
      "models": ("mistral:7b-instruct",) * 3},
-    # Hosted ceiling — zero disk, ~cents; needs GROQ_API_KEY.
-    {"name": "groq-70b", "backend": "groq", "models": None},
 ]
 
 # config.py env var names per pipeline stage.
@@ -60,8 +57,6 @@ _STAGE_ENV = ("CLASSIFICATION_MODEL", "EXTRACTION_MODEL", "REASONING_MODEL")
 
 def _runnable(cfg: Dict) -> Optional[str]:
     """Return a skip-reason string, or None if the config can run."""
-    if cfg["backend"] == "groq" and not os.getenv("GROQ_API_KEY"):
-        return "no GROQ_API_KEY"
     return None
 
 
@@ -69,7 +64,6 @@ def _run_one(cfg: Dict, domain: str, seeds: str, gap: float,
              timeout: int, raw_dir: Path) -> Dict:
     """Run one (config, domain) as a subprocess; return a result row."""
     env = os.environ.copy()
-    env["LLM_BACKEND"] = cfg["backend"]
     if cfg["models"]:
         for var, model in zip(_STAGE_ENV, cfg["models"]):
             env[var] = model
@@ -77,7 +71,7 @@ def _run_one(cfg: Dict, domain: str, seeds: str, gap: float,
     out_json = raw_dir / f"{cfg['name']}__{domain}.json"
     cmd = [
         sys.executable, "-m", "evals.run_eval",
-        "--backend", cfg["backend"], "--domain", domain,
+        "--domain", domain,
         "--seeds", seeds, "--gap-threshold", str(gap),
         "--output", str(out_json),
     ]

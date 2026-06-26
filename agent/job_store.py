@@ -6,7 +6,7 @@ When /solve runs in heuristic mode it returns a job_id; the client then calls
 Between the two calls we need to hold onto the extracted params + heuristic
 solution so the second call can warm-start the exact solver.
 
-Phase 1 design constraints (from brainstorm_ideas.md LOCKED PLAN):
+Phase 1 design constraints (locked):
 - In-memory dict, UUID-keyed, 10-minute TTL.
 - Single-process. A restart drops in-flight jobs; that is acceptable.
 - No Redis, no persistence, no multi-process safety.

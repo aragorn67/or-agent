@@ -8,7 +8,9 @@
 #                        Accepts mode={exact|heuristic|heuristic_then_ask}
 #   POST /continue     — resume a heuristic-mode job by job_id + action
 #   POST /agent/classify — classify problem type without solving
+import csv
 import io
+import json
 import threading
 from pathlib import Path
 
@@ -204,6 +206,79 @@ def export_xlsx(req: ExportRequest):
         media_type=(
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         ),
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
+
+
+def _primary_solution_table(sol: dict) -> tuple[str, list[dict]]:
+    """Pick the flat decision table to export: shipment flows for
+    transportation, the order->unit schedule for scheduling. Returns
+    (table_name, rows); rows is empty when neither is present."""
+    if sol.get("flows"):
+        return ("flows", list(sol["flows"]))
+    if sol.get("assignments"):
+        rows = [dict(r) for r in sol["assignments"]]
+        comp = sol.get("completion") or {}
+        if comp:
+            for r in rows:
+                key = r.get("order", next(iter(r.values()), None))
+                if key in comp:
+                    r["completion"] = comp[key]
+        return ("schedule", rows)
+    return ("", [])
+
+
+@app.post("/export/json")
+def export_json(req: ExportRequest):
+    """Download the full solved payload as JSON — lossless: objective, status,
+    bound/gap, the decision variables, and the extracted parameters."""
+    payload = {
+        "problem_type": req.problem_type,
+        "solution": req.solution or {},
+        "extracted_params": req.extracted_params or {},
+    }
+    buf = io.BytesIO(json.dumps(payload, indent=2, default=str).encode("utf-8"))
+    fname = f"{(req.problem_type or 'solution').lower()}_result.json"
+    return StreamingResponse(
+        buf,
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
+
+
+@app.post("/export/csv")
+def export_csv(req: ExportRequest):
+    """Download the decision table as CSV — shipment flows for transportation,
+    the order->unit schedule for scheduling. Falls back to a Metric/Value
+    summary when there is no tabular solution (use /export/json for the full
+    lossless payload)."""
+    sol = req.solution or {}
+    _, rows = _primary_solution_table(sol)
+
+    sbuf = io.StringIO()
+    if rows:
+        fieldnames = list(dict.fromkeys(k for r in rows for k in r.keys()))
+        writer = csv.DictWriter(sbuf, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+    else:
+        writer = csv.writer(sbuf)
+        writer.writerow(["Metric", "Value"])
+        for label, key in (
+            ("Problem type", None), ("Status", "status"),
+            ("Objective", "objective_value"), ("Best bound", "best_bound"),
+            ("Gap", "gap"),
+        ):
+            val = req.problem_type if key is None else sol.get(
+                key, sol.get("objective") if key == "objective_value" else "—"
+            )
+            writer.writerow([label, val])
+
+    buf = io.BytesIO(sbuf.getvalue().encode("utf-8"))
+    fname = f"{(req.problem_type or 'solution').lower()}_result.csv"
+    return StreamingResponse(
+        buf,
+        media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="{fname}"'},
     )
 

@@ -272,7 +272,7 @@ function onChip(opt){
   if (opt.action === 'example') return useExample(opt.index);
   if (opt.action === 'help')  { input.value = 'help'; return send(); }
   if (opt.action === 'table')   return renderTable();
-  if (opt.action === 'export')  return doExport();
+  if (opt.action === 'export')  return doExport(opt.fmt || 'xlsx');
   if (opt.fill){                       // prefill, let the user tweak specifics
     input.value = opt.message;
     input.focus();
@@ -330,7 +330,9 @@ function chipsFor(d){
     extra.push(...quickWhatIfs(d));
     extra.push({ label:'📋 Show table again', action:'table' });
     extra.push({ label:'🔍 Explain more', message:'explain the solution in more detail' });
-    extra.push({ label:'📥 Export .xlsx', action:'export' });
+    extra.push({ label:'📥 Export .xlsx', action:'export', fmt:'xlsx' });
+    extra.push({ label:'📄 Export .csv', action:'export', fmt:'csv' });
+    extra.push({ label:'🗎 Export .json', action:'export', fmt:'json' });
   }
   const seen = new Set();
   const all = [...base, ...extra, ...(newOpt ? [newOpt] : [])];
@@ -429,10 +431,11 @@ function autoRenderTable(){
   }
 }
 
-async function doExport(){
+async function doExport(fmt){
+  fmt = fmt || 'xlsx';
   if (!lastPayload){ addMsg('Nothing to export yet.', 'agent'); return; }
   try {
-    const r = await fetch('/export/xlsx', {
+    const r = await fetch('/export/' + fmt, {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({
         problem_type:    lastPayload.problem_type,
@@ -445,10 +448,10 @@ async function doExport(){
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = (lastPayload.problem_type || 'solution').toLowerCase() + '_result.xlsx';
+    a.download = (lastPayload.problem_type || 'solution').toLowerCase() + '_result.' + fmt;
     document.body.appendChild(a); a.click(); a.remove();
     URL.revokeObjectURL(url);
-    addMsg('📥 Workbook downloaded.', 'agent');
+    addMsg('📥 ' + fmt.toUpperCase() + ' downloaded.', 'agent');
   } catch (e) {
     addMsg('❌ Export failed: ' + e.message, 'agent');
   }

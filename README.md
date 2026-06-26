@@ -68,10 +68,10 @@ cd or-agent
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-# 2. pull the LLM
-ollama pull qwen3:14b
+# 2. pull the LLM (default model across all stages)
+ollama pull qwen3:8b
 
-# 4. one-shot solve from Python
+# 3. one-shot solve from Python
 python -c "
 from llm.enhanced_client import EnhancedLLMClient
 from agent.core import OptimizationAgent
@@ -103,7 +103,7 @@ A FastAPI server is included. Primary endpoints:
 - `POST /continue` — `{"job_id": "...", "action": "optimize|accept|use_heuristic"}` resumes a job started in heuristic mode.
 - `POST /chat/continue` — same as `/continue` but accepts a free-text `message` ("make it better", "good enough") that is mapped to an action.
 
-Auxiliary: `GET /health`, `GET /capabilities`, `POST /agent/classify`.
+Auxiliary: `GET /health`, `GET /capabilities`, `POST /agent/classify`. A solved payload can be exported via `POST /export/csv` (flat decision table — flows or schedule), `POST /export/json` (lossless), or `POST /export/xlsx`.
 
 ```bash
 uvicorn api:app --host 0.0.0.0 --port 8000
@@ -114,15 +114,9 @@ curl -s -X POST http://localhost:8000/solve \
   -d '{"description": "Two plants Seattle (cap 350) and San Diego (cap 600) ship to New York (demand 325), Chicago (demand 300), Topeka (demand 275). Distances in thousand miles — Seattle: NY=2.5, Chicago=1.7, Topeka=1.8. San Diego: NY=2.5, Chicago=1.8, Topeka=1.4. Freight $90 per case per thousand miles. Minimise total shipping cost."}'
 ```
 
-The LLM backend is selected by the `LLM_BACKEND` env var: `ollama` (default; uses the local qwen3:14b stack) or `groq` (uses Groq's hosted Llama models, set `GROQ_API_KEY`). The latter is intended for hosted deployments that cannot keep a 9 GB local model resident.
+The LLM backend is local **Ollama** (qwen3:8b across stages by default). Override per-stage models via `CLASSIFICATION_MODEL` / `EXTRACTION_MODEL` / `REASONING_MODEL`, and the Ollama host via `OLLAMA_HOST`.
 
-```bash
-LLM_BACKEND=groq GROQ_API_KEY=$GROQ_API_KEY \
-  GROQ_CLASSIFICATION_MODEL=llama-3.1-8b-instant \
-  uvicorn api:app --host 0.0.0.0 --port 8000
-```
-
-A `Dockerfile` is included for hosted deployment. For a zero-cost demo the API can be exposed publicly with [`cloudflared`](https://github.com/cloudflare/cloudflared) without any VPS:
+A `Dockerfile` is included for hosted deployment (still backed by Ollama). For a zero-cost demo the API can be exposed publicly with [`cloudflared`](https://github.com/cloudflare/cloudflared) without any VPS:
 
 ```bash
 cloudflared tunnel --url http://localhost:8000   # yields an ephemeral https://*.trycloudflare.com URL
@@ -182,7 +176,7 @@ python -m evals.run_eval --domain scheduling --seeds 1,2,3   # single-stage sche
 python -m evals.run_eval --n 20                              # 20 fresh seeds, transport
 ```
 
-The CLI defaults to local Ollama (`--backend ollama`); pass `--backend groq` to opt into the hosted backend. The framework writes a timestamped JSON report under `evals/results/` containing the six headline metrics.
+The framework writes a timestamped JSON report under `evals/results/` containing the six headline metrics.
 
 **System results (default `qwen3:8b`, local Ollama, n=3 seeds):**
 - *Transportation* — classification accuracy 1.00, mean parameter recall 1.00, median objective gap 0.00, end-to-end pass rate 1.00.
@@ -190,7 +184,7 @@ The CLI defaults to local Ollama (`--backend ollama`); pass `--backend groq` to 
 
 The framework has already paid for itself during development by surfacing four real bugs the existing hand-curated test set had missed: one feasibility-checker bug on the transport side, plus three on the scheduling side (an f-string format-spec crash in the scheduling extractor's system prompt, a non-recursive non-negativity check that rejected nested `processing_time` dicts, and an extraction-dispatch list that lagged behind the classifier's solver mapping).
 
-Caveat: synthetic random problems with feasibility margins built in are the easy end of the input distribution. The hand-curated set under `tests/or_problem_repository.py` (41 problems, incl. 9 infeasible across both domains and all three feasibility layers) is held out as a realism benchmark.
+Caveat: synthetic random problems with feasibility margins built in are the easy end of the input distribution. The harder end is covered by a **real-data correctness gate** (`evals/smoke_real_data_benchmark.py`) that runs the full NL pipeline over 57 hand-curated problems in `tests/or_problem_repository.py` — published textbook instances (Winston, Hillier, Wolsey) alongside out-of-scope and infeasible cases. It is a *gate*, not a smoke test: every solvable problem must classify to the right solver family, solve, and match its **independently-published optimum at 0.00% gap** (Powerco $1{,}020$, P&T $\$152{,}535$, Hillier 12.6-8 setup $36$); every out-of-scope problem must be refused for the right reason; the harness halts on any violation. Latest run: **57/57**.
 
 ## Baseline vs. system
 
@@ -210,8 +204,9 @@ Where the system has broken, why, and what fixed it (full detail in `ANALYSIS.md
 
 - **Silent transport-only degradation.** The post-solve stack (modification parse/apply, feasibility, suggestions) was written for transport and *silently* mis-handled scheduling — at worst returning a confidently-wrong *feasible* answer (€8) for an infeasible schedule. Fix pattern throughout: explicit per-domain dispatch + "unhandled ⇒ surface it, never silently pass".
 - **Fail-open feasibility default.** Layer-2 `UNKNOWN` was mapped to `FEASIBLE` "if Layers 0–1 pass" — a latent false-feasible for any domain without a Layer-1 check. Now fail-closed (`UNKNOWN`), with the hardened solver as backstop.
-- **LLM structured-output footguns.** `qwen3`/`deepseek-r1` emit `{}` instantly under Ollama `format=json` (never set it for those); Groq-Llama writes arithmetic like `a*b` instead of numbers (prompts must forbid it); a stale Groq model ID silently zeroed a sweep row. These are documented as guardrails, not one-off patches.
+- **LLM structured-output footguns.** `qwen3`/`deepseek-r1` emit `{}` instantly under Ollama `format=json` (never set it for those). Documented as a guardrail, not a one-off patch.
 - **Expected-but-absent speedup.** Warm-start was assumed to accelerate every solve; measured null on the current formulations. Reported honestly rather than cherry-picked.
+- **Two silent correctness bugs, caught by the gate not by hand-testing.** Hardening the real-data benchmark from "a number came out" into an *enforced* correctness gate immediately surfaced (a) a transshipment network being *solved* as bipartite transport — a model that cannot represent it — returning a confidently-wrong answer instead of refusing, and (b) the scheduling NL path unable to solve its own published anchor (the pure sequence-dependent-setup data had no extraction route). Both fixed. The lesson: make the eval *enforce* the answer, not just check that one exists.
 
 ## Project status
 
@@ -222,8 +217,9 @@ Where the system has broken, why, and what fixed it (full detail in `ANALYSIS.md
 - Sensitivity / what-if / re-solve follow-up analysis on transportation
 - Round-trip eval framework for both transportation and single-stage scheduling
 - Interactive heuristic + warm-start (VAM for transport) with LP bound reporting and a two-call API protocol (`/solve mode=heuristic_then_ask` → `/chat/continue`)
+- Solution export to CSV / JSON / xlsx (REST endpoints + chat-UI chips)
 
-**On the roadmap** (see [`brainstorm_ideas.md`](brainstorm_ideas.md) for detail):
+**On the roadmap** (see [`agenda.md`](agenda.md) for detail):
 - Metamorphic transforms layered on the eval (double-costs → double-objective, permute plants → same objective, etc.)
 - Scheduling heuristic + warm-start (LPT for makespan) — same scaffolding as transport, where MIP warm-start delivers real speedup
 - CSV/Excel data loaders
@@ -249,7 +245,7 @@ evals/                    Round-trip evaluation framework (see Evaluation above)
 tests/                    pytest suite covering classification, feasibility,
                           infeasibility handling, and normalizer
 api.py                    FastAPI server exposing the agent over HTTP
-brainstorm_ideas.md       Architecture notes, current bottlenecks, and roadmap
+agenda.md                 Forward plan / TODO list (priority + details)
 archive/ ML_RAG_archive/  Prior approaches kept for reference (see "not adopted")
 ```
 

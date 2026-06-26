@@ -10,11 +10,7 @@ The fix routes any *complete* params dict through the gate regardless of
 whether the LLM also attached an advisory note. These tests pin that.
 """
 
-import os
-
 import pytest
-
-os.environ.setdefault("LLM_BACKEND", "ollama")
 
 from agent.core import OptimizationAgent
 from llm.enhanced_client import EnhancedLLMClient

@@ -37,18 +37,17 @@ solutions/
 *.tmp
 *.temp
 
-# RAG Knowledge Base
+# Reference literature (textbooks + RAG corpus) — centralized, large, copyrighted
+data/literature/
+
+# RAG vector stores (large, regenerable)
 knowledge/papers/*.pdf
 knowledge/vectorstore/
-# RAG training files (too large for GitHub)
+knowledge/
 ML_approaches/RAG/papers/
 ML_approaches/RAG/vectorstore/
-knowledge/
-
-# ML & RAG Archive (large files - too big for GitHub)
-ML_RAG_archive/ML_approaches/RAG/papers/*.pdf
-ML_RAG_archive/ML_approaches/RAG/vectorstore/
 ML_RAG_archive/ML_approaches/RAG/papers/
+ML_RAG_archive/ML_approaches/RAG/vectorstore/
 
 # Generated eval outputs
 evals/results/
@@ -56,3 +55,6 @@ evals/results/
 # Runtime artifacts
 test_output/
 .pytest_cache/
+
+# Smoke benchmark resume state (local-only run artifact)
+.smoke_state.json

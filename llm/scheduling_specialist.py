@@ -61,6 +61,28 @@ NESTED STRUCTURE EXAMPLES:
 - processing_time: {"O1": {"U1": 2.0, "U2": 3.0}, "O2": {"U1": 1.5}}
 - changeover: {"U1": {"O1": {"O2": 0.5, "O3": 0.3}, "O2": {"O1": 0.4}}}
 - eligible: {"O1": ["U1", "U2"], "O2": ["U1"], "O3": ["U1", "U2"]}
+
+═══════════════════════════════════════════════════════════════════════════════
+SPECIAL CASE — PURE SEQUENCE-DEPENDENT SETUP (single machine, minimize total setup)
+═══════════════════════════════════════════════════════════════════════════════
+Some problems give ONLY a sequence-dependent setup-time matrix on ONE machine,
+with NO processing times and NO due dates — the goal is to order the jobs to
+minimize total setup time. The matrix has one row per "immediately preceding"
+job PLUS a special "None" row for the setup of whichever job runs FIRST (from
+the machine's idle state). A "—" / dash means not-applicable (the diagonal).
+
+For this case, output ONLY these keys (do NOT invent processing_time/due_date):
+- orders: list of the job labels exactly as named (e.g. ["1","2","3","4","5"])
+- setup_matrix: {preceding_job: {following_job: time}} INCLUDING a "None" key
+  for the initial-setup row. Skip every "—"/dash cell.
+- objective: "changeover"
+
+setup_matrix EXAMPLE for a 3-job table (rows None/1/2/3, dash on diagonal):
+  {"None": {"1": 4, "2": 5, "3": 8},
+   "1": {"2": 7, "3": 12},
+   "2": {"1": 6, "3": 10},
+   "3": {"1": 10, "2": 11}}
+Transcribe EVERY off-diagonal number and the whole None row — accuracy matters.
 """
 
         user = f"SCHEDULING PROBLEM:\n{description}\n\nReturn ONLY the JSON."
@@ -71,6 +93,19 @@ NESTED STRUCTURE EXAMPLES:
 
             if "error" in result:
                 return result
+
+            # Pure sequence-dependent setup problems (single machine, minimize
+            # total setup) carry a `setup_matrix` instead of processing times /
+            # due dates. The LLM transcribes the visible table; we deterministically
+            # assemble the solver's canonical changeover params (LLM reads, code
+            # builds the math).
+            if "setup_matrix" in result:
+                seq_error = self._validate_sequencing(result)
+                if seq_error:
+                    return {"error": seq_error}
+                return self._build_sequencing_params(
+                    result["orders"], result["setup_matrix"]
+                )
 
             # Deep validation for scheduling
             validation_error = self._validate_scheduling_deep(description, result)
@@ -242,6 +277,90 @@ NESTED STRUCTURE EXAMPLES:
             return f"You mentioned {unit_match.group(1)} units/machines but I found {len(units)} unit names. Please list all unit names clearly."
 
         return None  # All validations passed
+
+    @staticmethod
+    def _is_none_key(k) -> bool:
+        return str(k).strip().lower() in ("none", "idle", "start", "initial")
+
+    def _validate_sequencing(self, result: Dict) -> str:
+        """Validate a pure sequence-dependent setup extraction. Completeness is
+        enforced on purpose: a silently-missing setup entry would default to 0
+        and understate the objective, so we flag gaps as a clear error rather
+        than letting a wrong optimum slip through."""
+        orders = result.get("orders")
+        matrix = result.get("setup_matrix")
+        if not isinstance(orders, list) or not orders:
+            return "Sequencing problem needs a non-empty 'orders' list."
+        if not isinstance(matrix, dict) or not matrix:
+            return "Sequencing problem needs a 'setup_matrix' dict."
+
+        oset = {str(o) for o in orders}
+        if len(oset) != len(orders):
+            return "Duplicate job labels in 'orders'."
+
+        # Initial-setup ("None") row: one entry per job.
+        none_rows = [k for k in matrix if self._is_none_key(k)]
+        if not none_rows:
+            return ("Missing the initial-setup row (label 'None') giving the "
+                    "setup of whichever job runs first.")
+        init_row = matrix[none_rows[0]]
+        if not isinstance(init_row, dict):
+            return "The 'None' initial-setup row must map each job to a number."
+        missing_init = oset - {str(k) for k in init_row}
+        if missing_init:
+            return f"Initial-setup ('None') row missing jobs: {sorted(missing_init)}"
+
+        # Each job's outgoing row must cover every OTHER job (off-diagonal).
+        for o in orders:
+            row = matrix.get(str(o), matrix.get(o))
+            if not isinstance(row, dict):
+                return f"Missing the setup row for job '{o}' (after running it)."
+            have = {str(k) for k in row}
+            need = oset - {str(o)}
+            missing = need - have
+            if missing:
+                return (f"Setup row for job '{o}' missing transitions to "
+                        f"jobs: {sorted(missing)}")
+
+        # Every number must be a non-negative numeric.
+        for frm, tos in matrix.items():
+            for to, val in tos.items():
+                if not isinstance(val, (int, float)) or val < 0:
+                    return (f"Setup time from '{frm}' to '{to}' must be a "
+                            f"non-negative number, got: {val}")
+        return None
+
+    def _build_sequencing_params(self, orders: List, setup_matrix: Dict) -> Dict[str, Any]:
+        """Assemble the single-stage IPM's canonical changeover params from a
+        transcribed setup matrix. Single machine U1, zero processing time, and a
+        large sentinel due date — the model minimizes total (initial + inter-job)
+        setup. Mirrors the proven ground_truth_params shape exactly."""
+        UNIT = "U1"
+        orders = [str(o) for o in orders]
+
+        none_key = next(k for k in setup_matrix if self._is_none_key(k))
+        init_row = setup_matrix[none_key]
+        initial_changeover = {
+            o: {UNIT: float(init_row[o] if o in init_row else init_row[str(o)])}
+            for o in orders
+        }
+
+        changeover = {UNIT: {}}
+        for frm, tos in setup_matrix.items():
+            if self._is_none_key(frm):
+                continue
+            changeover[UNIT][str(frm)] = {str(to): float(v) for to, v in tos.items()}
+
+        return {
+            "orders": orders,
+            "units": [UNIT],
+            "eligible": {o: [UNIT] for o in orders},
+            "processing_time": {o: {UNIT: 0.0} for o in orders},
+            "due_date": {o: 1000.0 for o in orders},
+            "changeover": changeover,
+            "initial_changeover": initial_changeover,
+            "objective": "changeover",
+        }
 
     def explain_solution(self, solution: Dict) -> str:
         """Generate scheduling-specific solution explanation"""

@@ -864,7 +864,7 @@ For questions or issues:
 1. Check this documentation first
 2. Review test files for usage examples
 3. Check `Claude_Diary.md` for implementation history
-4. Consult `brainstorm_ideas.md` for architecture discussions
+4. Consult `agenda.md` for the forward plan / TODO list
 
 **Last Updated**: 2025-12-01
 **Status**: ✅ Production-ready for all problem types

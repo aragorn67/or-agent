@@ -63,18 +63,31 @@ class IntentRouter:
 
     def _check_deterministic_intent(self, message: str, context: Optional[Dict]) -> Optional[Dict[str, Any]]:
         """Fast deterministic intent detection for obvious cases"""
+        import re
 
         msg_lower = message.lower().strip()
+        msg_word_count = len(msg_lower.split())
+
+        # Smalltalk / help are short by nature. A long message that happens to
+        # contain "how to" or "hey" is almost always a real problem description
+        # (e.g., Winston's stockco: "tell stockco how to maximize the npv";
+        # Winston's kilroy: "where they should be located" → 'hey' in 'they').
+        # Gate the deterministic match by length; longer texts go to the LLM.
+        DETERMINISTIC_SHORT_MAX_WORDS = 15
+
+        def _has_word(text: str, pattern: str) -> bool:
+            # Word-boundary aware match so "hey" doesn't trip on "they".
+            return re.search(r"\b" + re.escape(pattern) + r"\b", text) is not None
 
         # Smalltalk patterns (greetings, identity questions)
         smalltalk_patterns = [
-            "hello", "hi ", "hey", "greetings",
+            "hello", "hi", "hey", "greetings",
             "who are you", "what are you", "your name",
             "good morning", "good afternoon", "good evening",
             "how are you", "nice to meet you"
         ]
 
-        if any(pattern in msg_lower for pattern in smalltalk_patterns):
+        if msg_word_count <= DETERMINISTIC_SHORT_MAX_WORDS and any(_has_word(msg_lower, p) for p in smalltalk_patterns):
             # But check if it's part of an optimization problem
             if not any(opt_word in msg_lower for opt_word in ["optimize", "minimize", "maximize", "cost", "capacity", "demand", "ship"]):
                 return {
@@ -90,7 +103,7 @@ class IntentRouter:
             "what types", "what kinds", "available options"
         ]
 
-        if any(pattern in msg_lower for pattern in help_patterns):
+        if msg_word_count <= DETERMINISTIC_SHORT_MAX_WORDS and any(p in msg_lower for p in help_patterns):
             return {
                 "intent": "help",
                 "confidence": 0.95,

@@ -257,11 +257,9 @@ def main(argv=None):
     p.add_argument("--seeds", default="1,2,3", help="Comma-separated seeds")
     p.add_argument("--k", type=int, default=3, help="Paraphrases per seed (max 10)")
     p.add_argument("--gap-threshold", type=float, default=0.01)
-    p.add_argument("--backend", choices=["ollama", "groq"], default="ollama")
     p.add_argument("--output", default="")
     args = p.parse_args(argv)
 
-    os.environ["LLM_BACKEND"] = args.backend
     from agent.core import OptimizationAgent
     from llm.enhanced_client import EnhancedLLMClient
 

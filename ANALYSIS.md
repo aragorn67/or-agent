@@ -6,6 +6,135 @@ into their parent result — this is a log of conclusions, not a diary.
 
 ---
 
+## 2026-06-26 — Smoke gate hardened to a real correctness check; it caught two bugs
+
+**Problem.** The smoke benchmark (`evals/smoke_real_data_benchmark.py`) only
+checked "did a number come out": it never asserted the classification, the
+`gap%` vs `published_optimum` was *printed not enforced*, and a `solvable=False`
+problem that got *wrongly solved* passed silently (`success` checked before the
+solvable marker). So a clean run didn't *mean* the pipeline was correct
+([[feedback_evals_are_synthetic]]) — exactly the gap that blocked the commit
+([[feedback_smoke_commit_gate]]).
+
+**Solution.**
+- **Phase-0 harness hardening.** `_classify_outcome` now holds solvable problems
+  to the full bar and `[STOP]`s on any violation: `wrongly_solved` (refuse-set
+  problem that solved), `gap_violation` (objective ≠ published optimum beyond
+  0.01%), `misclassified` (routed to the wrong solver family when no published
+  optimum exists to prove routing). A verified 0.00% gap against an *independent*
+  optimum is itself accepted as proof of correct routing — no wrong model
+  reproduces a published optimum by coincidence — so the label check only guards
+  the no-optimum cases. Classification compares by **solver family**, not exact
+  label, because the 5-vote classifier legitimately varies among equivalent
+  fine-grained labels (e.g. `single_machine_tardiness` ≡ `single_stage_scheduling`,
+  both → single-stage IPM). Computed gap is persisted to `.smoke_state.json`.
+- **Bug 1 the gate caught — min-cost-flow misroute (silent wrong answer).**
+  `problem_classifier.DEFAULT_SOLVER_BY_TYPE` mapped `min_cost_flow →
+  transport_basic_bipartite` as a "fallback". A transshipment network
+  (plants→hubs→regions, hub conservation) was thus *solved* as bipartite
+  transport — a model that can't represent it — emitting a confidently-wrong
+  310.0 instead of refusing. Fixed to `min_cost_flow → "none"` (refuse), matching
+  the prompt's own instruction and the `solvable=False` marker. All 3
+  `min_cost_flow` problems are `solvable=False`, so nothing solvable regressed.
+- **Bug 2 the gate caught — scheduling NL path couldn't solve its own anchor.**
+  `hillier_sequence_dependent_setup` (Hillier 12.6-8, published z*=36) is a pure
+  sequence-dependent-setup problem: the text is *only* a setup-time matrix with a
+  "None" initial row — no processing times, no due dates. The scheduling
+  extractor required `processing_time>0` + `due_date` and had no field for a
+  setup matrix, so extraction always failed. Built a **pure-sequencing extraction
+  path** (`llm/scheduling_specialist.py`): the LLM transcribes the visible table
+  into a flat `setup_matrix` (low cognitive load); deterministic code assembles
+  the solver's canonical `changeover`/`initial_changeover` params (single machine
+  U1, proc=0, sentinel due date) — LLM reads, code builds the math (on-thesis). A
+  completeness validator flags any missing transition rather than letting a
+  silently-defaulted-to-0 entry understate the objective. qwen3:8b transcribes
+  the 5×5+None matrix correctly; full NL pipeline reproduces z*=36 at 0.00% gap.
+- **Bug 3 (stale metadata).** `get_solver_id` fell through to `"none"` for
+  `parallel_machine_scheduling` though the classifier routes it to the
+  single-stage IPM and the pipeline solves it; added it to the single-stage
+  branch so repo metadata matches real routing (`bottling_line` was mislabeled).
+- **CSV/JSON export (quick win).** `/export/csv` (flat decision table — flows for
+  transport, schedule for scheduling, summary fallback) and `/export/json`
+  (lossless payload) endpoints, mirroring `/export/xlsx`; `.csv`/`.json` chips
+  added to the chat UI.
+
+**Result.** Full hardened sweep: **57/57 pass, zero `[STOP]`** — 10 solved, 47
+graceful refuse. The three independently-published optima all reproduce at
+**0.00% gap**: Powerco 1020 (Winston §7.1), P&T 152,535 (Hillier §9.1), Hillier
+12.6-8 setup 36. Finishing the run *without a stop is now itself the proof of
+correctness*, the acceptance criterion Task #1 set. The two bugs the new gate
+caught are precisely the silent failures the old "a number came out" check would
+have shipped.
+
+---
+
+## 2026-05-23 — Real-data benchmark + Groq removal + vaccine_cold_chain crash fix
+
+**Problem.** The eval suite was synthetic-only ([[feedback_evals_are_synthetic]]),
+which left the "n=10 is small / synthetic-only" critique unanswered. Separately,
+the Groq backend was still wired in code, configs, eval scripts, docs, and
+`~/.bashrc` despite the user-facing decision to go Ollama-only. And in
+preliminary testing, `vaccine_cold_chain` (a deliberately under-specified
+structural description with no numeric data) was crashing Pyomo at model-build
+time with a raw `KeyError('National Depot')` instead of failing gracefully
+through the feasibility gate.
+
+**Solution.**
+
+- **14 real textbook problems added** to `tests/or_problem_repository.py`
+  (41 → 55 entries): Winston ×10 (Powerco, Reservoir, Widgetco, Post Office,
+  Machineco, Stockco, Gandhi, Dorian, Nickles Lockbox, Kilroy) + Wolsey ×4
+  (UFL, lot-sizing, unit commitment, TSPTW). Each carries
+  `metadata.source` (full citation), `published_optimum` where the textbook
+  publishes one, and `metadata.tags` containing `"real_data_benchmark"` so
+  the runner can filter without touching the existing 41.
+- **Reference PDFs centralized** at `data/literature/` (gitignored) with a
+  committed `data/README.md` inventory.
+- **Groq removed end-to-end:** `llm/groq_client.py` deleted; references
+  stripped from `config.py`, `llm/enhanced_client.py`,
+  `evals/{smoke_real_data_benchmark,run_eval,paraphrase_holdout,
+  adversarial_eval,model_sweep}.py`, `tests/test_extraction_error_routing.py`,
+  `demos/heuristic_two_call_demo.py`, `README.md`, `agenda.md`,
+  plus the two `~/.bashrc` exports. One annotation kept at ANALYSIS.md:337
+  as the audit trail for the model-sweep removal.
+- **Smoke runner** `evals/smoke_real_data_benchmark.py` pipes problems
+  through `agent.solve_natural_language()` and reports
+  classification / extraction / objective-gap. A `--all` flag sweeps the
+  whole 55-problem repo; default sweeps only the `real_data_benchmark`-tagged
+  subset.
+- **`vaccine_cold_chain` crash fix (two-part):**
+  1. `solvers/transport/bipartite.py:validate_params` got coverage checks
+     — `plants` ⊆ `capacity` keys, `markets` ⊆ `demand` keys, full
+     `cost`/`distance` pair coverage. Previously only structural shape was
+     checked, so the LLM extracting `plants=['National Depot']` with
+     `capacity={}` passed validation, reached `solve()`, and Pyomo crashed
+     on `Param a['National Depot']` having no value.
+  2. `agent/core.py` post-extraction-failure site no longer calls
+     `_analysis_needs_baseline`. That keyword-based what-if guard was
+     false-positiving on "Decide… to minimize cost" prose and returning a
+     non-sequitur sensitivity guide ahead of the real "missing-data" error.
+     The early what-if gate still handles bare first-message what-ifs.
+
+**Result.** Repo at 55 problems, 14 real (textbook-cited) + 41 synthetic.
+`vaccine_cold_chain` now returns
+`status=infeasible, error="Parameter validation failed"` with actionable
+detail listing exactly which `capacity`/`demand`/`cost` entries are missing
+plus the LLM extractor's self-note — no Pyomo crash, no misleading
+sensitivity response. Backend surface is Ollama-only.
+
+**🔄 Pending (TODO when the full smoke sweep runs):** the 55-problem
+`--all` run is deferred to a cooler-room slot (GPU now at 100W cap via
+`nvidia-smi -pl 100`, ~30% perf cost for substantially less heat). Update
+this entry with: end-to-end success rate, objective-gap on the two
+immediately-solvable real-data entries (`winston_powerco_transportation`
+≈ 1020, `winston_gandhi_fixed_charge_production` ≈ 75), and the
+failure-mode histogram on the other ~12 textbook entries + the 41
+synthetic regression nets. Honest expectation per [[feedback_evals_are_synthetic]]:
+this run measures *plumbing and graceful failure*, not real-world OR
+competence — the latter still needs the large-xlsx tier (open backlog #1).
+
+---
+
 ## 2026-05-21 — Eval hardening: metamorphic + paraphrase + reliability + adversarial
 
 **Problem.** Round-trip eval (Phase 1/2) verified `params → solve →
@@ -331,11 +460,11 @@ edge case, not a regression.
   transport recall 0.90 / pass 0.333 / gap_med 0.50; the tiered variant
   isolates the qwen2.5 *extractor* as the param-dropping culprit.
   Scheduling was fine, transport disqualifying.
-- **Not a verdict (untested, ignore):** `groq-70b` class_acc 0.333/0.000 at
-  ~300 ms = instant API reject from a stale Groq model ID, never validly
-  exercised. `mistral-7b` class_acc 0.000 at ~13 s = output-format/parse
-  mismatch with the classifier, same family as the qwen3/Groq-Llama JSON
-  footgun. Both inconclusive re: actual capability.
+- **Not a verdict (untested, ignore):** `mistral-7b` class_acc 0.000 at
+  ~13 s = output-format/parse mismatch with the classifier, same family as
+  the qwen3 `format=json` footgun. Inconclusive re: actual capability.
+  *(A previously-tested `groq-70b` row was removed when the Groq backend
+  was deleted on 2026-05-23 — see commit history.)*
 
 ---
 
@@ -398,7 +527,7 @@ re-solve (verified: cap 50 correctly leaves the 1660 optimum unchanged
 because P2 only ships 40 — engine re-solved, didn't echo). Suites green
 across the work; the recurring 2 fails / 3 errors are the documented
 pre-existing baseline (us_manufacturing ordering, stale `LLMConfig`
-deepseek assert, Groq-429 / ML import) — unrelated to any change here.
+deepseek assert, ML import) — unrelated to any change here.
 
 ---
 

@@ -189,24 +189,18 @@ def main(argv=None):
     p.add_argument("--domain", type=str, default="transport", choices=["transport", "scheduling"])
     p.add_argument("--gap-threshold", type=float, default=0.01, help="Objective gap to count as pass")
     p.add_argument("--output", type=str, default="", help="Output JSON path (default auto-named)")
-    p.add_argument("--backend", type=str, default="ollama", choices=["ollama", "groq"],
-                   help="LLM backend (default: ollama). Overrides $LLM_BACKEND.")
     p.add_argument("--style", type=str, default="neutral", choices=["neutral", "noisy"],
                    help="Verbalizer style. 'noisy' applies deterministic typo/"
                         "article-drop/punctuation noise post-hoc (Phase-C "
                         "robustness-to-noise metric).")
     args = p.parse_args(argv)
 
-    # Force the chosen backend before importing the LLM client so shell env
-    # (e.g. LLM_BACKEND=groq exported globally) doesn't silently win.
-    os.environ["LLM_BACKEND"] = args.backend
-
     from agent.core import OptimizationAgent
     from llm.enhanced_client import EnhancedLLMClient
 
     seeds = _parse_seeds(args.seeds, args.n)
 
-    print(f"[run_eval] domain={args.domain} backend={args.backend} n={len(seeds)} "
+    print(f"[run_eval] domain={args.domain} backend=ollama n={len(seeds)} "
           f"gap_threshold={args.gap_threshold} style={args.style}", flush=True)
 
     llm = EnhancedLLMClient()

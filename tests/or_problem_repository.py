@@ -27,6 +27,26 @@ Each problem dict contains:
     - feasible: bool - is problem mathematically feasible (has solution)?
     - solvable: bool - can current solvers handle it?
     - notes: testing/implementation notes
+    - origin: "literature" | "synthetic" - provenance GATE (defaults to
+      "synthetic"). A "literature" problem is transcribed from a cited published
+      source and MUST carry metadata.source + ground_truth_params +
+      published_optimum; the smoke harness asserts the solver reproduces that
+      optimum at 0.00% gap. "synthetic" problems are hand-authored and exercise
+      the pipeline (classification/extraction/refusal) only — never gated on an
+      objective value. See validate_problem_schema() for the enforced invariant.
+    - ground_truth_params: exact numeric inputs transcribed verbatim from the
+      cited source (literature problems only). This is the answer key's FIXED
+      input — never LLM-extracted — so the published_optimum is meaningful.
+    - published_optimum: optimal objective value stated in the source
+      (literature + solvable problems; may be None when the source gives only a
+      solution structure, e.g. an unsolvable-by-us variant).
+    - published_solution: OPTIONAL structured optimal decision variables from the
+      source (e.g. {"x": {("P1","C2"): 10, ...}} for transport, or
+      {"sequence": [2,1,4,5,3]} for scheduling). Captures the full solution, not
+      just the objective value — stronger than published_optimum alone when a
+      problem has alternative optima. Until populated, the solution structure
+      lives in prose `notes`; prefer this field for new literature entries.
+    - metadata.source: full citation (book, edition, section, example, page).
 
 PROBLEM TYPE TAXONOMY:
 
@@ -236,8 +256,8 @@ without exceeding warehouse capacity.""",
         ]
     },
         "feasible": True,
-    "solvable": True,
-    "notes": "Realistic perishable distribution network."
+    "solvable": False,
+    "notes": "Narrative-only: gives the schema (warehouses/stores/cost) but no numeric capacities/demands/costs. Cannot be solved without data — pipeline correctly returns 'Parameter validation failed'. Marked solvable=False so smoke runner treats the graceful refusal as a PASS. Future feature: agent could prompt the user to supply missing numbers."
 },
 
 {
@@ -270,8 +290,8 @@ Decide shipping quantities to minimize total cost while meeting all demands.""",
         ]
     },
         "feasible": True,
-    "solvable": True,
-    "notes": "Steel logistics example; good for unbalanced transport detection."
+    "solvable": False,
+    "notes": "Narrative-only: gives the schema (mills/projects/cost) but no numeric capacities/demands/costs. Cannot be solved without data — pipeline correctly returns 'Parameter validation failed'. Marked solvable=False so smoke runner treats the graceful refusal as a PASS. Future feature: agent could prompt the user to supply missing numbers."
 },
 
 {
@@ -795,6 +815,231 @@ Minimise cost while meeting all demand within plant and lane capacities.""",
                  "< demand 60 — a problem-specific necessary-condition check "
                  "(per-sink capacity) catches this without the solver.",
     },
+
+    # ------------------------------------------------------------------
+    # REAL-DATA BENCHMARK ENTRIES (textbook problems with published optima)
+    # ------------------------------------------------------------------
+    {
+        "id": "transport/winston_powerco/001",
+        "name": "winston_powerco_transportation",
+        "category": ProblemCategory.TRANSPORTATION.value,
+        "expected_type": ProblemType.TRANSPORTATION.value,
+        "text": """Powerco has three electric power plants that supply the needs of four cities. Each power plant can supply the following numbers of kilowatt-hours (kwh) of electricity: plant 1 — 35 million; plant 2 — 50 million; plant 3 — 40 million. The peak power demands in these cities, which occur at the same time (2 P.M.), are as follows (in kwh): city 1 — 45 million; city 2 — 20 million; city 3 — 30 million; city 4 — 30 million. The costs of sending 1 million kwh of electricity from plant to city depend on the distance the electricity must travel.
+
+Shipping costs ($ per million kwh):
+Plant 1 to City 1: 8, City 2: 6, City 3: 10, City 4: 9
+Plant 2 to City 1: 9, City 2: 12, City 3: 13, City 4: 7
+Plant 3 to City 1: 14, City 2: 9, City 3: 16, City 4: 5
+
+Formulate an LP to minimize the cost of meeting each city's peak power demand.""",
+        "metadata": {
+            "units": {"cost": "USD/million_kwh", "capacity": "million_kwh", "demand": "million_kwh"},
+            "scale": {"sources": 3, "sinks": 4},
+            "balanced": True,  # supply=125, demand=125
+            "graph_signature": "bipartite_supply_demand",
+            "tags": ["real_data_benchmark", "textbook", "cost_min", "balanced"],
+            "source": "Winston, Operations Research: Applications and Algorithms, 4th ed., Ch.7 §7.1 Example 1 (Powerco), p.360-361",
+        },
+        "expected_schema": {
+            "sets": ["I_plants", "J_cities"],
+            "params": ["supply[i]", "demand[j]", "cost[i,j]"],
+            "vars": ["x[i,j] >= 0"],
+            "objective": "min sum_{i,j} cost[i,j]*x[i,j]",
+            "constraints": [
+                "sum_j x[i,j] <= supply[i] for all i",
+                "sum_i x[i,j] >= demand[j] for all j",
+            ],
+        },
+        "ground_truth_params": {
+            "plants": ["P1", "P2", "P3"],
+            "cities": ["C1", "C2", "C3", "C4"],
+            "supply": {"P1": 35, "P2": 50, "P3": 40},
+            "demand": {"C1": 45, "C2": 20, "C3": 30, "C4": 30},
+            "cost": {
+                "P1": {"C1": 8,  "C2": 6,  "C3": 10, "C4": 9},
+                "P2": {"C1": 9,  "C2": 12, "C3": 13, "C4": 7},
+                "P3": {"C1": 14, "C2": 9,  "C3": 16, "C4": 5},
+            },
+        },
+        "published_optimum": 1020.0,
+        "origin": "literature",
+        "feasible": True,
+        "solvable": True,
+        "notes": "Canonical balanced transportation problem. Published optimum z=1020 with x12=10, x13=25, x21=45, x23=5, x32=10, x34=30 (Winston §7.3).",
+    },
+
+    {
+        "id": "transport/winston_reservoir/001",
+        "name": "winston_reservoir_water_shortage",
+        "category": ProblemCategory.TRANSPORTATION.value,
+        "expected_type": ProblemType.TRANSPORTATION.value,
+        "text": """Two reservoirs are available to supply the water needs of three cities. Each reservoir can supply up to 50 million gallons of water per day. Each city would like to receive 40 million gallons per day. For each million gallons per day of unmet demand, there is a penalty. At city 1, the penalty is $20; at city 2, the penalty is $22; and at city 3, the penalty is $23.
+
+Shipping costs ($ per million gallons):
+Reservoir 1 to City 1: 7, City 2: 8, City 3: 10
+Reservoir 2 to City 1: 9, City 2: 7, City 3: 8
+
+Formulate a balanced transportation problem that can be used to minimize the sum of shortage and transport costs.""",
+        "metadata": {
+            "units": {"cost": "USD/million_gallons", "capacity": "million_gallons/day"},
+            "scale": {"sources": 2, "sinks": 3},
+            "balanced": False,  # supply=100 < demand=120; uses dummy shortage supply
+            "graph_signature": "bipartite_supply_demand_with_shortage_penalty",
+            "tags": ["real_data_benchmark", "textbook", "cost_min", "shortage_penalty", "unbalanced_demand_exceeds_supply"],
+            "source": "Winston, Operations Research: Applications and Algorithms, 4th ed., Ch.7 §7.1 Example 2 (Reservoir), p.365",
+        },
+        "expected_schema": {
+            "sets": ["I_reservoirs", "J_cities"],
+            "params": ["supply[i]", "demand[j]", "ship_cost[i,j]", "shortage_penalty[j]"],
+            "vars": ["x[i,j] >= 0", "shortage[j] >= 0"],
+            "objective": "min sum_{i,j} ship_cost[i,j]*x[i,j] + sum_j shortage_penalty[j]*shortage[j]",
+            "constraints": [
+                "sum_j x[i,j] <= supply[i] for all i",
+                "sum_i x[i,j] + shortage[j] = demand[j] for all j",
+            ],
+        },
+        "ground_truth_params": {
+            "reservoirs": ["R1", "R2"],
+            "cities": ["C1", "C2", "C3"],
+            "supply": {"R1": 50, "R2": 50},
+            "demand": {"C1": 40, "C2": 40, "C3": 40},
+            "ship_cost": {
+                "R1": {"C1": 7, "C2": 8, "C3": 10},
+                "R2": {"C1": 9, "C2": 7, "C3": 8},
+            },
+            "shortage_penalty": {"C1": 20, "C2": 22, "C3": 23},
+        },
+        "published_optimum": None,  # text gives solution structure (R1→C1:20, R1→C2:30, R2→C2:10, R2→C3:40, C1 short 20) but not aggregated z
+        "origin": "literature",
+        "feasible": True,
+        "solvable": False,  # current solver does not model shortage penalty term
+        "notes": "Unbalanced transport with explicit per-city shortage penalty. Published solution: R1→C1=20, R1→C2=30, R2→C2=10, R2→C3=40, City 1 shortage 20. Out of scope for current solver (no shortage-penalty objective term).",
+    },
+
+    {
+        "id": "transport/winston_widgetco/001",
+        "name": "winston_widgetco_transshipment",
+        "category": ProblemCategory.TRANSPORTATION.value,
+        "expected_type": ProblemType.MIN_COST_FLOW.value,
+        "text": """Widgetco manufactures widgets at two factories, one in Memphis and one in Denver. The Memphis factory can produce as many as 150 widgets per day, and the Denver factory can produce as many as 200 widgets per day. Widgets are shipped by air to customers in Los Angeles and Boston. The customers in each city require 130 widgets per day. Because of the deregulation of airfares, Widgetco believes that it may be cheaper to first fly some widgets to New York or Chicago and then fly them to their final destinations.
+
+Memphis and Denver are supply points; New York and Chicago are transshipment points; Los Angeles and Boston are demand points.
+
+Shipping costs ($ per widget; "—" indicates shipment is impossible):
+From Memphis: to N.Y. 8, to Chicago 13, to L.A. 25, to Boston 28
+From Denver:  to N.Y. 15, to Chicago 12, to L.A. 26, to Boston 25
+From N.Y.:    to Chicago 6, to L.A. 16, to Boston 17
+From Chicago: to N.Y. 6, to L.A. 14, to Boston 16
+(L.A. and Boston are demand points and do not ship onward.)
+
+Widgetco wants to minimize the total cost of shipping the required widgets to its customers.""",
+        "metadata": {
+            "units": {"cost": "USD/widget", "capacity": "widgets/day"},
+            "scale": {"nodes": 6, "supply_points": 2, "transshipment_points": 2, "demand_points": 2},
+            "graph_signature": "directed_network_with_transshipment",
+            "tags": ["real_data_benchmark", "textbook", "cost_min", "transshipment", "min_cost_flow"],
+            "source": "Winston, Operations Research: Applications and Algorithms, 4th ed., Ch.7 §7.6 Example 5 (Widgetco), p.400-402",
+        },
+        "expected_schema": {
+            "sets": ["N_nodes", "A_arcs"],
+            "params": ["supply[n]", "demand[n]", "cost[a]"],
+            "vars": ["flow[a] >= 0"],
+            "objective": "min sum_a cost[a]*flow[a]",
+            "constraints": [
+                "flow_conservation at each transshipment node",
+                "supply >= net_outflow at each supply node",
+                "demand <= net_inflow at each demand node",
+            ],
+        },
+        "ground_truth_params": {
+            "nodes": ["Memphis", "Denver", "NY", "Chicago", "LA", "Boston"],
+            "supply": {"Memphis": 150, "Denver": 200},
+            "demand": {"LA": 130, "Boston": 130},
+            "arcs": [
+                ("Memphis", "NY", 8),  ("Memphis", "Chicago", 13), ("Memphis", "LA", 25), ("Memphis", "Boston", 28),
+                ("Denver", "NY", 15),  ("Denver", "Chicago", 12),  ("Denver", "LA", 26),  ("Denver", "Boston", 25),
+                ("NY", "Chicago", 6),  ("NY", "LA", 16),           ("NY", "Boston", 17),
+                ("Chicago", "NY", 6),  ("Chicago", "LA", 14),      ("Chicago", "Boston", 16),
+            ],
+        },
+        "published_optimum": 6370.0,  # 130*8 (Mem→NY) + 130*16 (NY→LA) + 130*25 (Den→Bos) = 1040 + 2080 + 3250
+        "origin": "literature",
+        "feasible": True,
+        "solvable": False,  # min-cost-flow with intermediate nodes — no solver yet
+        "notes": "Transshipment example. Published optimal flow: Memphis ships 130 to NY then NY→LA (130), Denver ships 130 directly to Boston. Total cost = 6370. Out of scope for the bipartite transport solver.",
+    },
+
+    {
+        "id": "transport/hillier_pt_company/001",
+        "name": "hillier_pt_company_distribution",
+        "origin": "literature",
+        "category": ProblemCategory.TRANSPORTATION.value,
+        "expected_type": ProblemType.TRANSPORTATION.value,
+        "text": """The P&T Company ships canned peas by truck from three canneries to four distributing warehouses. The shipping cost per truckload depends on the cannery-warehouse pair.
+
+Outputs (truckloads available):
+- Cannery 1: 75
+- Cannery 2: 125
+- Cannery 3: 100
+
+Allocations (truckloads required):
+- Warehouse 1: 80
+- Warehouse 2: 65
+- Warehouse 3: 70
+- Warehouse 4: 85
+
+Shipping cost ($ per truckload):
+Cannery 1 to Warehouse 1: 464, 2: 513, 3: 654, 4: 867
+Cannery 2 to Warehouse 1: 352, 2: 416, 3: 690, 4: 791
+Cannery 3 to Warehouse 1: 995, 2: 682, 3: 388, 4: 685
+
+Determine the shipping plan that minimizes total shipping cost.""",
+        "metadata": {
+            "units": {"cost": "USD/truckload", "capacity": "truckloads", "demand": "truckloads"},
+            "scale": {"sources": 3, "sinks": 4},
+            "balanced": True,  # supply=300, demand=300
+            "graph_signature": "bipartite_supply_demand",
+            "tags": ["real_data_benchmark", "textbook", "cost_min", "balanced"],
+            "source": ("Hillier & Lieberman, Introduction to Operations Research, "
+                       "McGraw-Hill (2015), §9.1, Table 9.2 (P&T Co. prototype). "
+                       "Optimal Z=$152,535 stated in text (Table near p.323, objective "
+                       "cell TotalCost). Double-matched against transport_basic_bipartite "
+                       "at 0.00% gap."),
+        },
+        "expected_schema": {
+            "sets": ["I_canneries", "J_warehouses"],
+            "params": ["supply[i]", "demand[j]", "cost[i,j]"],
+            "vars": ["x[i,j] >= 0"],
+            "objective": "min sum_{i,j} cost[i,j]*x[i,j]",
+            "constraints": [
+                "sum_j x[i,j] <= supply[i] for all i",
+                "sum_i x[i,j] >= demand[j] for all j",
+            ],
+        },
+        "ground_truth_params": {
+            "plants": ["C1", "C2", "C3"],
+            "markets": ["W1", "W2", "W3", "W4"],
+            "capacity": {"C1": 75, "C2": 125, "C3": 100},
+            "demand": {"W1": 80, "W2": 65, "W3": 70, "W4": 85},
+            "cost": {
+                "C1": {"W1": 464, "W2": 513, "W3": 654, "W4": 867},
+                "C2": {"W1": 352, "W2": 416, "W3": 690, "W4": 791},
+                "C3": {"W1": 995, "W2": 682, "W3": 388, "W4": 685},
+            },
+        },
+        "published_optimum": 152535.0,
+        # One optimal allocation reproduced by transport_basic_bipartite (objective
+        # is uniquely 152535; alternative optimal allocations may exist).
+        "published_solution": {
+            "x": {"C1-W2": 20, "C1-W4": 55, "C2-W1": 80, "C2-W2": 45,
+                  "C3-W3": 70, "C3-W4": 30},
+        },
+        "feasible": True,
+        "solvable": True,
+        "notes": ("Classic balanced transportation prototype (Hillier P&T Co.). "
+                  "Optimal total cost $152,535, double-matched against the solver at "
+                  "0.00% gap. Companion to winston_powerco_transportation on the gated bar."),
+    },
 ]
 
 
@@ -803,6 +1048,81 @@ Minimise cost while meeting all demand within plant and lane capacities.""",
 # ============================================================================
 
 SCHEDULING_PROBLEMS = [
+    {
+        "id": "sched/hillier_seqdep_setup/001",
+        "name": "hillier_sequence_dependent_setup",
+        "origin": "literature",
+        "category": ProblemCategory.SCHEDULING.value,
+        "expected_type": ProblemType.SINGLE_STAGE_SCHEDULING.value,
+        "text": """Five jobs must be processed on a single machine. The setup time needed before a job depends on which job immediately preceded it (a sequence-dependent setup). A job processed first incurs an initial setup from the machine's idle ("None") state.
+
+Setup times (hours) — row = immediately preceding job, column = job being set up:
+            Job 1   Job 2   Job 3   Job 4   Job 5
+None          4       5       8       9       4
+After 1       —       7      12      10       9
+After 2       6       —      10      14      11
+After 3      10      11       —      12      10
+After 4       7       8      15       —       7
+After 5      12       9       8      16       —
+
+In what order should the five jobs be processed to minimize the total setup time?""",
+        "metadata": {
+            "units": {"setup_time": "hours"},
+            "scale": {"orders": 5, "units": 1},
+            "graph_signature": "single_machine_sequence_dependent_setup",
+            "tags": ["real_data_benchmark", "textbook", "scheduling",
+                     "sequence_dependent_setup", "changeover_min", "enumeration_verified"],
+            "source": ("Hillier & Lieberman, Introduction to Operations Research, "
+                       "McGraw-Hill (2015), Ch.12 Integer Programming, Problem 12.6-8. "
+                       "Posed as a B&B exercise (no optimum stated in text); z*=36 derived "
+                       "by exhaustive enumeration of all 5!=120 sequences — the method the "
+                       "exercise itself prescribes — and cross-checked against "
+                       "single_stage_ipm_scheduling at 0.00% gap. See "
+                       "tests/test_scheduling_ground_truth.py."),
+        },
+        "expected_schema": {
+            "sets": ["O_orders", "U_units"],
+            "params": ["setup[prev,job]", "initial_setup[job]"],
+            "vars": ["assign[o,u] in {0,1}", "precedence[o,o',u] in {0,1}"],
+            "objective": "min total setup (initial + inter-job)",
+            "constraints": [
+                "each job processed exactly once",
+                "single contiguous sequence on the one machine",
+            ],
+        },
+        # Verbatim solver inputs. processing_time=0 and a slack due_date isolate
+        # the pure sequence-dependent-setup objective (no processing/deadline
+        # interaction), exactly matching the textbook problem. initial_changeover
+        # carries the "None" row so the first job's setup is counted.
+        "ground_truth_params": {
+            "orders": ["1", "2", "3", "4", "5"],
+            "units": ["U1"],
+            "eligible": {"1": ["U1"], "2": ["U1"], "3": ["U1"], "4": ["U1"], "5": ["U1"]},
+            "processing_time": {o: {"U1": 0.0} for o in ["1", "2", "3", "4", "5"]},
+            "due_date": {"1": 1000.0, "2": 1000.0, "3": 1000.0, "4": 1000.0, "5": 1000.0},
+            "changeover": {"U1": {
+                "1": {"2": 7,  "3": 12, "4": 10, "5": 9},
+                "2": {"1": 6,  "3": 10, "4": 14, "5": 11},
+                "3": {"1": 10, "2": 11, "4": 12, "5": 10},
+                "4": {"1": 7,  "2": 8,  "3": 15, "5": 7},
+                "5": {"1": 12, "2": 9,  "3": 8,  "4": 16},
+            }},
+            "initial_changeover": {
+                "1": {"U1": 4}, "2": {"U1": 5}, "3": {"U1": 8},
+                "4": {"U1": 9}, "5": {"U1": 4},
+            },
+            "objective": "changeover",
+        },
+        "published_optimum": 36.0,  # enumerated optimum; optimal sequence 2->1->4->5->3
+        "feasible": True,
+        "solvable": True,
+        "notes": ("Single-machine sequence-dependent setup minimization (Hillier 12.6-8). "
+                  "Optimal sequence 2->1->4->5->3 with total setup 36 (initial 5 + inter-job 31). "
+                  "Exercises the IPM changeover objective + the initial-setup term. Without that "
+                  "term the model has alternative optima at inter-job-total 31, one of which "
+                  "(4->2->1->5->3) is suboptimal for the real problem (40) — which is why "
+                  "initial_changeover was added to the solver."),
+    },
     {
         "id": "sched/chem_batch/001",
         "name": "chemical_batch_production",
@@ -904,8 +1224,8 @@ The goal is to minimize total completion time (makespan).""",
         ]
     },
     "feasible": True,
-    "solvable": True,  # ✅ Solver has makespan objective
-    "notes": "Real industrial scheduling with setup-time dependency. SOLVABLE: single_stage_ipm solver supports makespan objective."
+    "solvable": False,
+    "notes": "Narrative-only: '6 wafer lots' + setup-time mention but no actual processing times, setup matrix, or eligibility data. Cannot be solved without data — pipeline correctly fails extraction. Marked solvable=False so smoke runner treats the graceful refusal as a PASS. Future feature: agent could prompt the user to supply missing numbers."
 },
 
 {
@@ -1332,6 +1652,45 @@ Minimise makespan while meeting all due dates.""",
                  "layer — now genuinely available for scheduling — sees the "
                  "coupling.",
     },
+
+    # ------------------------------------------------------------------
+    # REAL-DATA BENCHMARK ENTRIES (textbook scheduling problems)
+    # ------------------------------------------------------------------
+    {
+        "id": "sched/winston_post_office/001",
+        "name": "winston_post_office_shift_rostering",
+        "origin": "literature",
+        "category": ProblemCategory.SCHEDULING.value,
+        "expected_type": ProblemType.SHIFT_ROSTERING.value,
+        "text": """A post office requires different numbers of full-time employees on different days of the week. The number of full-time employees required on each day is as follows: Monday 17, Tuesday 13, Wednesday 15, Thursday 19, Friday 14, Saturday 16, Sunday 11. Union rules state that each full-time employee must work five consecutive days and then receive two days off. For example, an employee who works Monday to Friday must be off on Saturday and Sunday. The post office wants to meet its daily requirements using only full-time employees.
+
+Formulate an LP that the post office can use to minimize the number of full-time employees who must be hired.""",
+        "metadata": {
+            "units": {"requirement": "employees", "objective": "employees_total"},
+            "scale": {"shift_patterns": 7, "days": 7},
+            "tags": ["real_data_benchmark", "textbook", "shift_rostering", "set_covering_style", "min_workforce"],
+            "source": "Winston, Operations Research: Applications and Algorithms, 4th ed., Ch.3 §3.5 Example 7 (Post Office), p.72-74",
+        },
+        "expected_schema": {
+            "sets": ["S_start_days", "D_days"],
+            "params": ["requirement[d]", "covers[s,d]"],
+            "vars": ["x[s] >= 0 (integer)"],
+            "objective": "min sum_s x[s]",
+            "constraints": [
+                "sum_s covers[s,d] * x[s] >= requirement[d] for all d",
+            ],
+        },
+        "ground_truth_params": {
+            "start_days": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
+            "days": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
+            "requirement": {"Mon": 17, "Tue": 13, "Wed": 15, "Thu": 19, "Fri": 14, "Sat": 16, "Sun": 11},
+            # covers[s][d] = 1 iff an employee starting on day s works on day d (5 consecutive days)
+        },
+        "published_optimum": 23.0,  # IP optimum z=23; LP relaxation z = 67/3 ≈ 22.33
+        "feasible": True,
+        "solvable": False,  # set-covering shift-rostering — outside the single-stage IPM solver
+        "notes": "Classic set-covering-style shift-rostering LP. IP optimum z=23 (x1=4, x2=4, x3=2, x4=6, x5=0, x6=4, x7=3). LP relaxation z=67/3≈22.33 (fractional). Note: alternative optimal IP solutions exist (Winston notes LINDO/LINGO finds z=23 with 23 employees in a different schedule). Out of scope for current solver.",
+    },
 ]
 
 # ============================================================================
@@ -1409,6 +1768,58 @@ Maximize total monthly revenue.""",
         "solvable": False,
         "notes": "Maximization assignment - solver not yet implemented"
     },
+
+    # ------------------------------------------------------------------
+    # REAL-DATA BENCHMARK ENTRIES (textbook assignment problems)
+    # ------------------------------------------------------------------
+    {
+        "id": "assign/winston_machineco/001",
+        "name": "winston_machineco_assignment",
+        "origin": "literature",
+        "category": ProblemCategory.ASSIGNMENT.value,
+        "expected_type": ProblemType.ASSIGNMENT.value,
+        "text": """Machineco has four machines and four jobs to be completed. Each machine must be assigned to complete one job. The time required to set up each machine for completing each job is given below. Machineco wants to minimize the total setup time needed to complete the four jobs.
+
+Setup times (hours):
+Machine 1: Job 1 = 14, Job 2 = 5,  Job 3 = 8,  Job 4 = 7
+Machine 2: Job 1 = 2,  Job 2 = 12, Job 3 = 6,  Job 4 = 5
+Machine 3: Job 1 = 7,  Job 2 = 8,  Job 3 = 3,  Job 4 = 9
+Machine 4: Job 1 = 2,  Job 2 = 4,  Job 3 = 6,  Job 4 = 10
+
+Use linear programming to solve this problem.""",
+        "metadata": {
+            "units": {"cost": "hours"},
+            "scale": {"machines": 4, "jobs": 4},
+            "balanced": True,
+            "characteristics": ["one_to_one", "bipartite", "hungarian_solvable"],
+            "tags": ["real_data_benchmark", "textbook", "cost_min", "matching"],
+            "source": "Winston, Operations Research: Applications and Algorithms, 4th ed., Ch.7 §7.5 Example 4 (Machineco), p.393-396",
+        },
+        "expected_schema": {
+            "sets": ["M_machines", "J_jobs"],
+            "params": ["time[m,j]"],
+            "vars": ["x[m,j] in {0,1}"],
+            "objective": "min sum_{m,j} time[m,j]*x[m,j]",
+            "constraints": [
+                "sum_j x[m,j] = 1 for all m",
+                "sum_m x[m,j] = 1 for all j",
+            ],
+        },
+        "ground_truth_params": {
+            "machines": ["M1", "M2", "M3", "M4"],
+            "jobs": ["J1", "J2", "J3", "J4"],
+            "time": {
+                "M1": {"J1": 14, "J2": 5,  "J3": 8,  "J4": 7},
+                "M2": {"J1": 2,  "J2": 12, "J3": 6,  "J4": 5},
+                "M3": {"J1": 7,  "J2": 8,  "J3": 3,  "J4": 9},
+                "M4": {"J1": 2,  "J2": 4,  "J3": 6,  "J4": 10},
+            },
+        },
+        "published_optimum": 15.0,  # x12=1 (5h), x24=1 (5h), x33=1 (3h), x41=1 (2h) → 5+5+3+2 = 15
+        "feasible": True,
+        "solvable": False,  # no dedicated assignment solver yet (Hungarian/binary)
+        "notes": "Canonical 4x4 assignment problem. Published optimum z=15 with M1→J2, M2→J4, M3→J3, M4→J1. Out of scope for current bipartite-transport solver (assignment binary structure).",
+    },
 ]
 
 # ============================================================================
@@ -1484,6 +1895,42 @@ Maximize total cargo value without exceeding capacity.""",
                 "feasible": True,
         "solvable": False,
         "notes": "Weight-constrained knapsack"
+    },
+
+    {
+        "id": "knapsack/winston_stockco/001",
+        "name": "winston_stockco_capital_budgeting",
+        "origin": "literature",
+        "category": ProblemCategory.KNAPSACK.value,
+        "expected_type": ProblemType.ZERO_ONE_KNAPSACK.value,
+        "text": """Stockco is considering four investments. Investment 1 will yield a net present value (NPV) of $16,000; investment 2, an NPV of $22,000; investment 3, an NPV of $12,000; and investment 4, an NPV of $8,000. Each investment requires a certain cash outflow at the present time: investment 1, $5,000; investment 2, $7,000; investment 3, $4,000; and investment 4, $3,000. Currently, $14,000 is available for investment.
+
+Formulate an IP whose solution will tell Stockco how to maximize the NPV obtained from investments 1–4.""",
+        "metadata": {
+            "units": {"npv": "USD", "outflow": "USD", "budget": "USD"},
+            "scale": {"items": 4},
+            "capacity": 14000,
+            "characteristics": ["binary", "budget_constraint"],
+            "tags": ["real_data_benchmark", "textbook", "return_max", "capital_budgeting"],
+            "source": "Winston, Operations Research: Applications and Algorithms, 4th ed., Ch.9 §9.2 Example 1 (Stockco), p.478",
+        },
+        "expected_schema": {
+            "sets": ["I_investments"],
+            "params": ["npv[i]", "outflow[i]", "budget"],
+            "vars": ["select[i] in {0,1}"],
+            "objective": "max sum_i npv[i]*select[i]",
+            "constraints": ["sum_i outflow[i]*select[i] <= budget"],
+        },
+        "ground_truth_params": {
+            "investments": ["I1", "I2", "I3", "I4"],
+            "npv": {"I1": 16000, "I2": 22000, "I3": 12000, "I4": 8000},
+            "outflow": {"I1": 5000, "I2": 7000, "I3": 4000, "I4": 3000},
+            "budget": 14000,
+        },
+        "published_optimum": 42000.0,
+        "feasible": True,
+        "solvable": False,
+        "notes": "Canonical 0-1 knapsack (capital budgeting). Published optimum z=42000 with x1=0, x2=x3=x4=1 (Winston §9.5).",
     },
 ]
 
@@ -1651,6 +2098,212 @@ Minimize total production + overtime + inventory costs.""",
         "solvable": False,
         "notes": "Multi-product aggregate planning - solver not yet implemented"
     },
+
+    {
+        "id": "prod/winston_gandhi/001",
+        "name": "winston_gandhi_fixed_charge_production",
+        "origin": "literature",
+        "category": ProblemCategory.PRODUCTION_PLANNING.value,
+        "expected_type": ProblemType.PRODUCTION_PLANNING.value,
+        "text": """Gandhi Cloth Company is capable of manufacturing three types of clothing: shirts, shorts, and pants. The manufacture of each type of clothing requires that Gandhi have the appropriate type of machinery available. The machinery needed to manufacture each type of clothing must be rented at the following rates: shirt machinery, $200 per week; shorts machinery, $150 per week; pants machinery, $100 per week. The manufacture of each type of clothing also requires the amounts of cloth and labor shown below. Each week, 150 hours of labor and 160 sq yd of cloth are available.
+
+Resource requirements:
+Shirt:  3 labor hours, 4 sq yd cloth
+Shorts: 2 labor hours, 3 sq yd cloth
+Pants:  6 labor hours, 4 sq yd cloth
+
+Revenue / cost per unit:
+Shirt:  Sales price $12, Variable cost $6
+Shorts: Sales price $8,  Variable cost $4
+Pants:  Sales price $15, Variable cost $8
+
+Formulate an IP whose solution will maximize Gandhi's weekly profits.""",
+        "metadata": {
+            "units": {"price": "USD/unit", "rent": "USD/week", "labor": "hours/unit", "cloth": "sqyd/unit"},
+            "scale": {"products": 3},
+            "tags": ["real_data_benchmark", "textbook", "fixed_charge", "profit_max", "production_with_setup"],
+            "source": "Winston, Operations Research: Applications and Algorithms, 4th ed., Ch.9 §9.2 Example 3 (Gandhi), p.480-482",
+        },
+        "expected_schema": {
+            "sets": ["P_products"],
+            "params": ["margin[p]", "fixed_cost[p]", "labor[p]", "cloth[p]", "labor_budget", "cloth_budget"],
+            "vars": ["x[p] >= 0 integer", "y[p] in {0,1}"],
+            "objective": "max sum_p margin[p]*x[p] - sum_p fixed_cost[p]*y[p]",
+            "constraints": [
+                "sum_p labor[p]*x[p] <= labor_budget",
+                "sum_p cloth[p]*x[p] <= cloth_budget",
+                "x[p] <= M[p]*y[p] for all p (fixed-charge linking)",
+            ],
+        },
+        "ground_truth_params": {
+            "products": ["shirt", "shorts", "pants"],
+            "margin": {"shirt": 6, "shorts": 4, "pants": 7},  # price - var cost
+            "fixed_cost": {"shirt": 200, "shorts": 150, "pants": 100},
+            "labor": {"shirt": 3, "shorts": 2, "pants": 6},
+            "cloth": {"shirt": 4, "shorts": 3, "pants": 4},
+            "labor_budget": 150,
+            "cloth_budget": 160,
+            "big_M": {"shirt": 40, "shorts": 53, "pants": 25},
+        },
+        "published_optimum": 75.0,
+        "feasible": True,
+        "solvable": False,
+        "notes": "Classic fixed-charge production IP (Winston). Published optimum z=75. OUT OF SCOPE for current pipeline: our fixed_cost MIP solver is bipartite-transport-specific (plants→markets schema); Gandhi is production planning (products + multi-resource constraints + machinery setup costs), which the LLM correctly classifies as ~knapsack-family — but we don't have a solver registered for that family. Flipped solvable=True→False on 2026-05-24 after the smoke benchmark surfaced the mismatch; the prior 'matches our fixed_cost MIP solver' claim was wrong.",
+    },
+
+    {
+        "id": "prod/winston_dorian/001",
+        "name": "winston_dorian_either_or_production",
+        "origin": "literature",
+        "category": ProblemCategory.PRODUCTION_PLANNING.value,
+        "expected_type": ProblemType.PRODUCTION_PLANNING.value,
+        "text": """Dorian Auto is considering manufacturing three types of autos: compact, midsize, and large. The resources required for, and the profits yielded by, each type of car are shown below. Currently, 6,000 tons of steel and 60,000 hours of labor are available. For production of a type of car to be economically feasible, at least 1,000 cars of that type must be produced.
+
+Resource and profit per car:
+Compact: 1.5 tons steel, 30 hours labor, $2,000 profit
+Midsize: 3 tons steel,   25 hours labor, $3,000 profit
+Large:   5 tons steel,   40 hours labor, $4,000 profit
+
+Formulate an IP to maximize Dorian's profit.""",
+        "metadata": {
+            "units": {"steel": "tons", "labor": "hours", "profit": "USD"},
+            "scale": {"products": 3},
+            "tags": ["real_data_benchmark", "textbook", "either_or", "batch_minimum", "profit_max"],
+            "source": "Winston, Operations Research: Applications and Algorithms, 4th ed., Ch.9 §9.2 Example 6 (Dorian), p.488-489",
+        },
+        "expected_schema": {
+            "sets": ["P_products"],
+            "params": ["profit[p]", "steel[p]", "labor[p]", "min_batch", "steel_budget", "labor_budget"],
+            "vars": ["x[p] >= 0 integer", "y[p] in {0,1}"],
+            "objective": "max sum_p profit[p]*x[p]",
+            "constraints": [
+                "sum_p steel[p]*x[p] <= steel_budget",
+                "sum_p labor[p]*x[p] <= labor_budget",
+                "x[p] = 0 OR x[p] >= min_batch for all p (either-or)",
+            ],
+        },
+        "ground_truth_params": {
+            "products": ["compact", "midsize", "large"],
+            "profit": {"compact": 2000, "midsize": 3000, "large": 4000},
+            "steel": {"compact": 1.5, "midsize": 3, "large": 5},
+            "labor": {"compact": 30, "midsize": 25, "large": 40},
+            "min_batch": 1000,
+            "steel_budget": 6000,
+            "labor_budget": 60000,
+        },
+        "published_optimum": 6000000.0,  # text says z=6000 in thousands → $6,000,000
+        "feasible": True,
+        "solvable": False,
+        "notes": "Either-or batch-minimum production IP. Published optimum z=$6,000,000 with x_midsize=2000, y_midsize=1, others=0. Without the 1000-batch minimum the optimum would be 570 compacts + 1715 midsize. Out of scope (either-or constraint not in our current MIP templates).",
+    },
+
+    {
+        "id": "prod/wolsey_lot_sizing_6period/001",
+        "name": "wolsey_lot_sizing_6period",
+        "origin": "literature",
+        "category": ProblemCategory.PRODUCTION_PLANNING.value,
+        "expected_type": ProblemType.LOT_SIZING.value,
+        "text": """Formulate and solve an instance of the (capacitated) lot-sizing problem over six periods.
+
+Per-period data:
+- demands:            d = (6, 7, 4, 6, 3, 8)
+- unit production costs: p = (3, 4, 3, 4, 4, 5)
+- unit storage costs:    h = (1, 1, 1, 1, 1, 1)
+- set-up costs:          f = (12, 15, 30, 23, 19, 45)
+- maximum production capacity: C = 10 items per period
+
+Decide a per-period production plan (with set-ups when producing) and inventory levels to minimize total production + storage + setup costs while meeting all demand.""",
+        "metadata": {
+            "units": {"cost": "abstract", "production": "items/period"},
+            "scale": {"periods": 6},
+            "tags": ["real_data_benchmark", "textbook", "wolsey", "lot_sizing", "capacitated", "cost_min"],
+            "source": "Wolsey, Integer Programming, 2nd ed. (2021), Ch.1 §1.9 Exercise 14, p.22",
+        },
+        "expected_schema": {
+            "sets": ["T_periods"],
+            "params": ["demand[t]", "prod_cost[t]", "storage_cost[t]", "setup_cost[t]", "capacity"],
+            "vars": ["y[t] >= 0 (production)", "s[t] >= 0 (stock)", "x[t] in {0,1} (setup)"],
+            "objective": "min sum_t prod_cost[t]*y[t] + storage_cost[t]*s[t] + setup_cost[t]*x[t]",
+            "constraints": [
+                "s[t-1] + y[t] = d[t] + s[t] for all t",
+                "y[t] <= capacity * x[t] for all t",
+                "s[0] = 0",
+            ],
+        },
+        "ground_truth_params": {
+            "periods": [1, 2, 3, 4, 5, 6],
+            "demand": {1: 6, 2: 7, 3: 4, 4: 6, 5: 3, 6: 8},
+            "prod_cost": {1: 3, 2: 4, 3: 3, 4: 4, 5: 4, 6: 5},
+            "storage_cost": {1: 1, 2: 1, 3: 1, 4: 1, 5: 1, 6: 1},
+            "setup_cost": {1: 12, 2: 15, 3: 30, 4: 23, 5: 19, 6: 45},
+            "capacity": 10,
+        },
+        "published_optimum": None,
+        "feasible": True,
+        "solvable": False,
+        "notes": "Wolsey 6-period CLSP instance — book gives data, not optimum. Compute optimum offline before scoring objective_gap.",
+    },
+
+    {
+        "id": "prod/wolsey_unit_commitment/001",
+        "name": "wolsey_unit_commitment_5gen_12period",
+        "origin": "literature",
+        "category": ProblemCategory.PRODUCTION_PLANNING.value,
+        "expected_type": ProblemType.PRODUCTION_PLANNING.value,
+        "text": """Consider a unit commitment problem with 5 generators and 12 two-hour time periods. Period 1 follows on again from period 12, and the pattern repeats daily.
+
+Per-period demands: d = (50, 60, 50, 100, 80, 70, 90, 60, 50, 120, 110, 70)
+Reserve requirement: total capacity switched on in any period >= 1.2 * demand.
+
+Generator capacities:        C = (12, 12, 35, 50, 75)
+Generator minimum production: L = (2, 2, 5, 20, 40)
+
+Each generator, when on, must stay on for at least two periods.
+Ramping constraints (apply only to the fifth generator): when on in two successive periods, output cannot increase by more than 20 from one period to the next, and cannot decrease by more than 15.
+
+Costs (approximate):
+- start-up cost: g = (100, 100, 300, 400, 800)
+- fixed cost per on-period: f = (1, 1, 5, 10, 15)
+- variable cost per unit:   p = (10, 10, 4, 3, 2)
+
+Formulate and solve with a MIP system.""",
+        "metadata": {
+            "units": {"demand": "MW", "cost": "abstract"},
+            "scale": {"generators": 5, "periods": 12},
+            "tags": ["real_data_benchmark", "textbook", "wolsey", "unit_commitment", "ramping", "min_uptime", "cost_min"],
+            "source": "Wolsey, Integer Programming, 2nd ed. (2021), Ch.14 §14.8 Exercise 2, p.288",
+        },
+        "expected_schema": {
+            "sets": ["G_generators", "T_periods"],
+            "params": ["demand[t]", "capacity[g]", "min_load[g]", "startup_cost[g]", "fixed_cost[g]", "var_cost[g]", "reserve_factor", "min_uptime"],
+            "vars": ["x[g,t] in {0,1} (on/off)", "y[g,t] >= 0 (output)", "z[g,t] in {0,1} (startup)"],
+            "objective": "min sum_{g,t} startup_cost[g]*z[g,t] + fixed_cost[g]*x[g,t] + var_cost[g]*y[g,t]",
+            "constraints": [
+                "sum_g y[g,t] = demand[t] for all t",
+                "sum_g capacity[g]*x[g,t] >= reserve_factor*demand[t] for all t",
+                "min_load[g]*x[g,t] <= y[g,t] <= capacity[g]*x[g,t]",
+                "min uptime + ramping for generator 5",
+            ],
+        },
+        "ground_truth_params": {
+            "generators": ["G1", "G2", "G3", "G4", "G5"],
+            "periods": list(range(1, 13)),
+            "demand": {1: 50, 2: 60, 3: 50, 4: 100, 5: 80, 6: 70, 7: 90, 8: 60, 9: 50, 10: 120, 11: 110, 12: 70},
+            "capacity": {"G1": 12, "G2": 12, "G3": 35, "G4": 50, "G5": 75},
+            "min_load": {"G1": 2, "G2": 2, "G3": 5, "G4": 20, "G5": 40},
+            "startup_cost": {"G1": 100, "G2": 100, "G3": 300, "G4": 400, "G5": 800},
+            "fixed_cost": {"G1": 1, "G2": 1, "G3": 5, "G4": 10, "G5": 15},
+            "var_cost": {"G1": 10, "G2": 10, "G3": 4, "G4": 3, "G5": 2},
+            "reserve_factor": 1.2,
+            "min_uptime": 2,
+            "ramp_up_g5": 20,
+            "ramp_down_g5": 15,
+        },
+        "published_optimum": None,
+        "feasible": True,
+        "solvable": False,
+        "notes": "Wolsey unit commitment instance with reserve, min-uptime, and generator-5 ramping. Book gives data only; optimum must be computed via MIP solver. Cyclic boundary (period 1 follows period 12) is non-trivial.",
+    },
 ]
 
 # ============================================================================
@@ -1696,6 +2349,111 @@ Minimize total opening cost + shipping cost.""",
                 "feasible": True,
         "solvable": False,
         "notes": "Baseline UFL for classification testing"
+    },
+
+    {
+        "id": "facloc/winston_nickles_lockbox/001",
+        "name": "winston_nickles_lockbox_location",
+        "origin": "literature",
+        "category": ProblemCategory.FACILITY_LOCATION.value,
+        "expected_type": ProblemType.UNCAPACITATED_FACILITY_LOCATION.value,
+        "text": """J. C. Nickles receives credit card payments from four regions of the country (West, Midwest, East, and South). The average daily value of payments mailed by customers from each region is: the West, $70,000; the Midwest, $50,000; the East, $60,000; the South, $40,000. Nickles must decide where customers should mail their payments. Because Nickles can earn 20% annual interest by investing these revenues, it would like to receive payments as quickly as possible. Nickles is considering setting up operations to process payments (often referred to as lockboxes) in four different cities: Los Angeles, Chicago, New York, and Atlanta. The average number of days (from time payment is sent) until a check clears and Nickles can deposit the money depends on the city to which the payment is mailed. The annual cost of running a lockbox in any city is $50,000. Assume that each region must send all its money to a single city and that there is no limit on the amount of money that each lockbox can handle.
+
+Average days from mailing until payment clears:
+              City 1 (L.A.)  City 2 (Chicago)  City 3 (N.Y.)  City 4 (Atlanta)
+West:              2               6                  8                8
+Midwest:           6               2                  5                5
+East:              8               5                  2                5
+South:             8               5                  5                2
+
+Formulate an IP to minimize the sum of costs due to lost interest and lockbox operations.""",
+        "metadata": {
+            "units": {"days": "days", "lockbox_cost": "USD/year", "interest_rate": "0.20"},
+            "scale": {"regions": 4, "candidate_cities": 4},
+            "tags": ["real_data_benchmark", "textbook", "facility_location", "cost_min", "single_assignment"],
+            "source": "Winston, Operations Research: Applications and Algorithms, 4th ed., Ch.9 §9.2 Example 4 (Nickles Lockbox), p.483-485",
+        },
+        "expected_schema": {
+            "sets": ["I_regions", "J_cities"],
+            "params": ["daily_value[i]", "days[i,j]", "interest_rate", "lockbox_cost[j]"],
+            "vars": ["x[i,j] in {0,1}", "y[j] in {0,1}"],
+            "objective": "min sum_{i,j} interest_rate*daily_value[i]*days[i,j]*x[i,j] + sum_j lockbox_cost[j]*y[j]",
+            "constraints": [
+                "sum_j x[i,j] = 1 for all i",
+                "x[i,j] <= y[j] for all (i,j)",
+            ],
+        },
+        "ground_truth_params": {
+            "regions": ["West", "Midwest", "East", "South"],
+            "cities": ["LA", "Chicago", "NY", "Atlanta"],
+            "daily_value": {"West": 70000, "Midwest": 50000, "East": 60000, "South": 40000},
+            "days": {
+                "West":    {"LA": 2, "Chicago": 6, "NY": 8, "Atlanta": 8},
+                "Midwest": {"LA": 6, "Chicago": 2, "NY": 5, "Atlanta": 5},
+                "East":    {"LA": 8, "Chicago": 5, "NY": 2, "Atlanta": 5},
+                "South":   {"LA": 8, "Chicago": 5, "NY": 5, "Atlanta": 2},
+            },
+            "interest_rate": 0.20,
+            "lockbox_cost": {"LA": 50000, "Chicago": 50000, "NY": 50000, "Atlanta": 50000},
+        },
+        "published_optimum": 242000.0,  # $ thousands in text — z=242 (thousands) = $242,000
+        "feasible": True,
+        "solvable": False,
+        "notes": "Uncapacitated facility location IP. Published optimum z=$242,000 with lockboxes in LA + NY; West→LA, Midwest+East+South→NY.",
+    },
+
+    {
+        "id": "facloc/wolsey_ufl_ex12/001",
+        "name": "wolsey_ufl_5depots_6clients",
+        "origin": "literature",
+        "category": ProblemCategory.FACILITY_LOCATION.value,
+        "expected_type": ProblemType.UNCAPACITATED_FACILITY_LOCATION.value,
+        "text": """Solve an instance of the uncapacitated facility location problem with 5 candidate depots and 6 clients. f_j is the cost of opening depot j, and c_ij is the cost of satisfying all client i's demand from depot j.
+
+Depot opening costs: f = (4, 3, 4, 4, 7)
+
+Cost matrix c[client i][depot j] (6 rows × 5 columns):
+Client 1: 12 13  6  0  1
+Client 2:  8  4  9  1  2
+Client 3:  2  6  6  0  1
+Client 4:  3  5  2  1  8
+Client 5:  8  0  5 10  8
+Client 6:  2  0  3  4  1
+
+Decide which depots to open and which depot serves each client to minimize the sum of opening + transportation costs.""",
+        "metadata": {
+            "units": {"cost": "abstract"},
+            "scale": {"depots": 5, "clients": 6},
+            "tags": ["real_data_benchmark", "textbook", "wolsey", "facility_location", "cost_min"],
+            "source": "Wolsey, Integer Programming, 2nd ed. (2021), Ch.1 §1.9 Exercise 12, p.22",
+        },
+        "expected_schema": {
+            "sets": ["J_depots", "I_clients"],
+            "params": ["fixed_cost[j]", "transport_cost[i,j]"],
+            "vars": ["y[i,j] >= 0", "x[j] in {0,1}"],
+            "objective": "min sum_{i,j} transport_cost[i,j]*y[i,j] + sum_j fixed_cost[j]*x[j]",
+            "constraints": [
+                "sum_j y[i,j] = 1 for all i",
+                "y[i,j] <= x[j] for all (i,j)",
+            ],
+        },
+        "ground_truth_params": {
+            "depots": ["D1", "D2", "D3", "D4", "D5"],
+            "clients": ["C1", "C2", "C3", "C4", "C5", "C6"],
+            "fixed_cost": {"D1": 4, "D2": 3, "D3": 4, "D4": 4, "D5": 7},
+            "transport_cost": {
+                "C1": {"D1": 12, "D2": 13, "D3": 6,  "D4": 0,  "D5": 1},
+                "C2": {"D1": 8,  "D2": 4,  "D3": 9,  "D4": 1,  "D5": 2},
+                "C3": {"D1": 2,  "D2": 6,  "D3": 6,  "D4": 0,  "D5": 1},
+                "C4": {"D1": 3,  "D2": 5,  "D3": 2,  "D4": 1,  "D5": 8},
+                "C5": {"D1": 8,  "D2": 0,  "D3": 5,  "D4": 10, "D5": 8},
+                "C6": {"D1": 2,  "D2": 0,  "D3": 3,  "D4": 4,  "D5": 1},
+            },
+        },
+        "published_optimum": None,  # Wolsey gives instance only; optimum to be computed via MIP solver
+        "feasible": True,
+        "solvable": False,
+        "notes": "Wolsey UFL instance — book does not publish optimum (exercise prompt: 'Solve using a MIP system'). Optimum must be computed externally before this entry can score objective_gap.",
     },
 ]
 
@@ -1743,6 +2501,74 @@ Minimize total distance traveled.""",
         "solvable": False,
         "notes": "Capacity only; good for label check"
     },
+
+    {
+        "id": "vrp/wolsey_tsp_time_windows/001",
+        "name": "wolsey_tsp_with_time_windows_9customers",
+        "origin": "literature",
+        "category": ProblemCategory.VEHICLE_ROUTING.value,
+        "expected_type": ProblemType.VRPTW.value,
+        "text": """A truck driver must deliver to nine customers on a given day, starting and finishing at the depot. Each customer i = 1,…,9 has a time window [r_i, d_i] and an unloading time p_i. The driver must start unloading at client i during the specified time interval. If she is early, she has to wait till time r_i before starting to unload. Node 0 denotes the depot, and c_ij is the travel time between nodes i and j.
+
+Processing times:    p = (0, 1, 5, 9, 2, 7, 5, 1, 5, 3)        (index 0 = depot, then customers 1..9)
+Release times:       r = (0, 1, 5, 9, 2, 7, 5, 1, 5, 3)        — start of time window (same indexing)
+Deadlines:           d = (150, 45, 42, 40, 150, 48, 96, 100, 127, 66)  — end of time window
+
+Travel-time matrix c_ij (10×10; '—' = same node):
+       0   1   2   3   4   5   6   7   8   9
+  0:   —   5   4   4   4   6   3   2   1   8
+  1:   7   —   2   5   3   5   4   4   4   9
+  2:   3   4   —   1   1  12   4   3  11   6
+  3:   2   2   3   —   2  23   2   9  11   4
+  4:   6   4   7   2   —   9   8   3   2   1
+  5:   1   4   6   7   3   —   8   5   7   4
+  6:  12  32   5  12  18   5   —   7   9   6
+  7:   9  11   4  12  32   5  12   —   5  22
+  8:   6   4   7   3   5   8   6   9   —   5
+  9:   4   6   4   7   3   5   8   6   9   —
+
+Determine a tour visiting all 9 customers starting and ending at the depot, respecting time windows and unloading times.""",
+        "metadata": {
+            "units": {"time": "abstract"},
+            "scale": {"nodes": 10, "customers": 9},
+            "tags": ["real_data_benchmark", "textbook", "wolsey", "tsp", "time_windows", "single_vehicle"],
+            "source": "Wolsey, Integer Programming, 2nd ed. (2021), Ch.14 §14.8 Exercise 11, p.290",
+        },
+        "expected_schema": {
+            "sets": ["N_nodes (includes depot)"],
+            "params": ["travel_time[i,j]", "release[i]", "deadline[i]", "service[i]"],
+            "vars": ["x[i,j] in {0,1} (arc used)", "t[i] >= 0 (start of service at i)"],
+            "objective": "min total_completion_time (or feasibility-only)",
+            "constraints": [
+                "tour visits every customer exactly once",
+                "release[i] <= t[i] <= deadline[i]",
+                "t[j] >= t[i] + service[i] + travel_time[i,j] if x[i,j]=1",
+            ],
+        },
+        "ground_truth_params": {
+            "nodes": list(range(10)),
+            "depot": 0,
+            "processing": {0: 0, 1: 1, 2: 5, 3: 9, 4: 2, 5: 7, 6: 5, 7: 1, 8: 5, 9: 3},
+            "release":    {0: 0, 1: 1, 2: 5, 3: 9, 4: 2, 5: 7, 6: 5, 7: 1, 8: 5, 9: 3},
+            "deadline":   {0: 150, 1: 45, 2: 42, 3: 40, 4: 150, 5: 48, 6: 96, 7: 100, 8: 127, 9: 66},
+            "travel_time_rows": [
+                [None, 5, 4, 4, 4, 6, 3, 2, 1, 8],
+                [7, None, 2, 5, 3, 5, 4, 4, 4, 9],
+                [3, 4, None, 1, 1, 12, 4, 3, 11, 6],
+                [2, 2, 3, None, 2, 23, 2, 9, 11, 4],
+                [6, 4, 7, 2, None, 9, 8, 3, 2, 1],
+                [1, 4, 6, 7, 3, None, 8, 5, 7, 4],
+                [12, 32, 5, 12, 18, 5, None, 7, 9, 6],
+                [9, 11, 4, 12, 32, 5, 12, None, 5, 22],
+                [6, 4, 7, 3, 5, 8, 6, 9, None, 5],
+                [4, 6, 4, 7, 3, 5, 8, 6, 9, None],
+            ],
+        },
+        "published_optimum": None,
+        "feasible": True,
+        "solvable": False,
+        "notes": "Wolsey TSP-with-time-windows instance. Single-vehicle routing on 10 nodes (depot + 9 customers). Book provides instance data only; optimum to be computed externally.",
+    },
 ]
 
 # ============================================================================
@@ -1784,6 +2610,56 @@ Minimize number of sensors used.""",
                 "feasible": True,
         "solvable": False,
         "notes": "Binary cover model"
+    },
+
+    {
+        "id": "setcover/winston_kilroy/001",
+        "name": "winston_kilroy_fire_station_set_covering",
+        "origin": "literature",
+        "category": ProblemCategory.SET_COVER.value,
+        "expected_type": ProblemType.SET_COVER.value,
+        "text": """There are six cities (cities 1–6) in Kilroy County. The county must determine where to build fire stations. The county wants to build the minimum number of fire stations needed to ensure that at least one fire station is within 15 minutes (driving time) of each city.
+
+Driving times between cities in Kilroy County (minutes):
+        City 1  City 2  City 3  City 4  City 5  City 6
+City 1:   0      10      20      30      30      20
+City 2:  10       0      25      35      20      10
+City 3:  20      25       0      15      30      20
+City 4:  30      35      15       0      15      25
+City 5:  30      20      30      15       0      14
+City 6:  20      10      20      25      14       0
+
+Formulate an IP that will tell Kilroy how many fire stations should be built and where they should be located.""",
+        "metadata": {
+            "units": {"time": "minutes"},
+            "scale": {"cities": 6, "candidate_locations": 6},
+            "coverage_radius": 15,
+            "tags": ["real_data_benchmark", "textbook", "set_cover", "facility_location_covering"],
+            "source": "Winston, Operations Research: Applications and Algorithms, 4th ed., Ch.9 §9.2 Example 5 (Kilroy Fire Station), p.486-487",
+        },
+        "expected_schema": {
+            "sets": ["C_cities", "L_locations"],
+            "params": ["covers[l,c]"],
+            "vars": ["x[l] in {0,1}"],
+            "objective": "min sum_l x[l]",
+            "constraints": ["sum_l covers[l,c]*x[l] >= 1 for all c"],
+        },
+        "ground_truth_params": {
+            "cities": ["C1", "C2", "C3", "C4", "C5", "C6"],
+            "locations": ["C1", "C2", "C3", "C4", "C5", "C6"],
+            "covers": {
+                "C1": ["C1", "C2"],
+                "C2": ["C1", "C2", "C6"],
+                "C3": ["C3", "C4"],
+                "C4": ["C3", "C4", "C5"],
+                "C5": ["C4", "C5", "C6"],
+                "C6": ["C2", "C5", "C6"],
+            },
+        },
+        "published_optimum": 2.0,
+        "feasible": True,
+        "solvable": False,
+        "notes": "Classic set-covering IP. Published optimum z=2 with stations in cities 2 and 4. Multiple alternative optima.",
     },
 ]
 
@@ -1897,6 +2773,13 @@ def get_all_problems() -> List[Dict]:
     for problem in all_problems:
         if 'solver_id' not in problem:
             problem['solver_id'] = get_solver_id(problem)
+        # Provenance defaults to "synthetic" unless a problem explicitly opts
+        # into the literature gate. The two-way check in validate_problem_schema
+        # guarantees this default can't silently hide a literature problem that
+        # forgot the flag (any entry carrying published_optimum/ground_truth_params
+        # must be marked "literature").
+        if 'origin' not in problem:
+            problem['origin'] = 'synthetic'
 
     return all_problems
 
@@ -1989,7 +2872,21 @@ def list_problems(category: Optional[str] = None, solvable_only: bool = False):
         print()
 
 def validate_problem_schema(problem: Dict) -> List[str]:
-    """Validate that a problem has all required fields."""
+    """Validate that a problem has all required fields and a consistent provenance.
+
+    Beyond the basic required-field check, this enforces the literature-gate
+    invariant (two-way, so the "synthetic" default can never silently hide a
+    literature problem):
+
+      - origin == "literature"  ==>  must carry a citation (metadata.source),
+        ground_truth_params, and — when solvable — a non-None published_optimum.
+      - carries published_optimum or ground_truth_params  ==>  origin MUST be
+        "literature" (you cannot leave answer-key data in a synthetic problem).
+
+    The actual "solver reproduces published_optimum at 0.00% gap" check lives in
+    the smoke harness, not here — this only guarantees the *data* is well-formed
+    and correctly classified.
+    """
     required_fields = ['id', 'name', 'category', 'expected_type', 'text', 'solvable', 'notes']
     errors = []
 
@@ -2001,7 +2898,44 @@ def validate_problem_schema(problem: Dict) -> List[str]:
         if 'units' not in problem['metadata']:
             errors.append("metadata should contain 'units' field")
 
+    # Provenance gate. origin defaults to "synthetic" at read time, so treat a
+    # missing value as synthetic here too.
+    origin = problem.get('origin', 'synthetic')
+    if origin not in ('literature', 'synthetic'):
+        errors.append(f"origin must be 'literature' or 'synthetic', got {origin!r}")
+
+    has_optimum = problem.get('published_optimum') is not None
+    has_gt = 'ground_truth_params' in problem
+    has_source = bool(problem.get('metadata', {}).get('source'))
+
+    if origin == 'literature':
+        if not has_source:
+            errors.append("origin='literature' requires a metadata.source citation")
+        if not has_gt:
+            errors.append("origin='literature' requires ground_truth_params (verbatim from source)")
+        if problem.get('solvable') and not has_optimum:
+            errors.append("origin='literature' + solvable requires a non-None published_optimum")
+    else:  # synthetic
+        if has_optimum:
+            errors.append("published_optimum present but origin!='literature' (mark it 'literature')")
+        if has_gt:
+            errors.append("ground_truth_params present but origin!='literature' (mark it 'literature')")
+
     return errors
+
+
+def validate_repository() -> Dict[str, List[str]]:
+    """Validate every problem; return {problem_name: [errors]} for any with issues.
+
+    Empty dict == repository is internally consistent. Call from a test or the
+    CLI ('validate' subcommand) to fail loudly on a malformed/mis-tagged entry.
+    """
+    report: Dict[str, List[str]] = {}
+    for problem in get_all_problems():
+        errs = validate_problem_schema(problem)
+        if errs:
+            report[problem.get('name', problem.get('id', '<unknown>'))] = errs
+    return report
 
 # ============================================================================
 # COMMAND-LINE INTERFACE (with argparse)
@@ -2106,6 +3040,9 @@ Examples:
         else:
             print(f"Found {total_errors} errors")
         print()
+        # Non-zero exit so this doubles as a CI / pre-commit gate.
+        if total_errors:
+            raise SystemExit(1)
 
     elif args.command == 'categories':
         print(f"\n{'='*80}")
@@ -2156,10 +3093,15 @@ def get_solver_id(problem: Dict) -> str:
     if expected_type == ProblemType.MIN_COST_FLOW.value:
         return "none"
 
-    # Single-stage scheduling family
+    # Single-stage scheduling family. Parallel-machine scheduling routes here
+    # too: the classifier maps PARALLEL_MACHINE_SCHEDULING ->
+    # single_stage_ipm_scheduling (multi-unit support), and the pipeline solves
+    # it end-to-end, so the repo metadata must agree (was falling through to
+    # "none", which mislabeled bottling_line_parallel_machines).
     if expected_type in [
         ProblemType.SINGLE_STAGE_SCHEDULING.value,
-        ProblemType.SINGLE_MACHINE_TARDINESS.value
+        ProblemType.SINGLE_MACHINE_TARDINESS.value,
+        ProblemType.PARALLEL_MACHINE_SCHEDULING.value
     ]:
         return "single_stage_ipm_scheduling"
 

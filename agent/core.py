@@ -279,11 +279,11 @@ class OptimizationAgent:
                         explain=True,
                     )
 
-                guide = self._analysis_needs_baseline(
-                    description, conversation_context, allow_data_rich=True
-                )
-                if guide is not None:
-                    return guide
+                # At this point: extractor self-flagged a concern AND validation
+                # also found gaps. The LLM's note is the authoritative signal —
+                # don't second-guess it via the keyword-based what-if guide
+                # (which false-positives on "decide ... minimize cost" prose
+                # and produces a non-sequitur sensitivity response).
                 return {
                     "success": False,
                     "status": "infeasible",
@@ -447,8 +447,10 @@ class OptimizationAgent:
                 )
 
             update_progress("Complete!", 100)
+            sol_status = str(solution.get("status", "")).upper() if isinstance(solution, dict) else ""
+            solve_success = sol_status not in ("INFEASIBLE", "UNBOUNDED", "ERROR", "FAILED")
             result = {
-                "success": True,
+                "success": solve_success,
                 "problem_type": problem_type,
                 "confidence": confidence,
                 "extracted_params": params,
@@ -460,6 +462,8 @@ class OptimizationAgent:
                     "grounding_check", "unknown"
                 ),
             }
+            if not solve_success:
+                result["error"] = solution.get("message") or f"Solver returned status: {sol_status or 'unknown'}"
             if analysis_results:
                 result["analysis"] = analysis_results
             conversation_context["last_solution"] = result

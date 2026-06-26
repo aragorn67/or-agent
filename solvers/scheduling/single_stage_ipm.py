@@ -16,7 +16,7 @@ Based on Immediate-Precedence MILP (IPM) formulation from Section 3.1
 from typing import Dict, List, Any, Optional, Tuple
 from pyomo.environ import (
     ConcreteModel, Set, Param, Var, NonNegativeReals, Binary,
-    Objective, Constraint, minimize, value, TransformationFactory,
+    Objective, Constraint, Expression, minimize, value, TransformationFactory,
     SolverFactory,
 )
 from pyomo.contrib.appsi.solvers.highs import Highs
@@ -83,6 +83,9 @@ class SingleStageIPMSolver(OptimizationSolver):
 
         if "changeover" in params and not isinstance(params["changeover"], dict):
             errors.append("`changeover` must be a dict ((i,i',j)->val) or nested {j:{i:{i':val}}}")
+
+        if "initial_changeover" in params and not isinstance(params["initial_changeover"], dict):
+            errors.append("`initial_changeover` must be a dict ((i,j)->val) or nested {i:{j:val}}")
 
         if "window" in params and not isinstance(params["window"], dict):
             errors.append("`window` must be a dict {order: 0/1}")
@@ -151,6 +154,11 @@ class SingleStageIPMSolver(OptimizationSolver):
 
         T = self._normalize_matrix_ij(params["processing_time"])
         changeover = self._normalize_tensor_iip_j(params.get("changeover", {}))
+        # Setup incurred when order i is the FIRST job on unit j (no predecessor).
+        # Same (i,j) shape as processing_time; defaults to 0 so models that omit
+        # it are unchanged. Lets the IPM count the real "None -> first" setup
+        # (e.g. Hillier & Lieberman 12.6-8) instead of only inter-job changeovers.
+        init_chg = self._normalize_matrix_ij(params.get("initial_changeover", {}))
         DDATE: Dict[str, float] = {str(k): float(v) for k, v in params["due_date"].items()}
         window: Dict[str, float] = {str(k): float(v) for k, v in params.get("window", {}).items()}
         lower: Dict[str, float] = {str(k): float(v) for k, v in params.get("lower", {}).items()}
@@ -181,6 +189,10 @@ class SingleStageIPMSolver(OptimizationSolver):
             return float(changeover.get((i, ip, j), 0.0))
         m.changeover = Param(m.I, m.I, m.J, initialize=_chg_init, within=NonNegativeReals, mutable=True)
 
+        def _initchg_init(m, i, j):
+            return float(init_chg.get((i, j), 0.0))
+        m.InitChg = Param(m.I, m.J, initialize=_initchg_init, within=NonNegativeReals, default=0.0, mutable=True)
+
         m.DDATE = Param(m.I, initialize=DDATE, within=NonNegativeReals)
 
         def _win_init(m, i):
@@ -203,6 +215,14 @@ class SingleStageIPMSolver(OptimizationSolver):
         m.XX = Var(((i, ip, j) for i in I for ip in I if i != ip for j in J), domain=Binary)  # immediate precedence
         m.C = Var(m.I, domain=NonNegativeReals)  # completion time
         m.Cmax = Var(domain=NonNegativeReals)    # makespan
+
+        # IsFirst[i,j] == 1 iff order i is assigned to unit j with no predecessor
+        # on it (i.e. it is the first job on that unit). Linear in existing vars:
+        # the Pred constraint guarantees sum_{i2} XX[i2,i,j] <= Y[i,j], so this is
+        # 1 exactly for a first job, 0 otherwise (never negative).
+        def _is_first_rule(m, i, j):
+            return m.Y[i, j] - sum(m.XX[i2, i, j] for i2 in m.I if i2 != i)
+        m.IsFirst = Expression(m.I, m.J, rule=_is_first_rule)
 
         # Constraints
         # (3.1.1) assignment: Σ_{j∈J_i} Y[i,j] = 1
@@ -241,9 +261,15 @@ class SingleStageIPMSolver(OptimizationSolver):
             return m.C[i] >= m.Lower[i] + sum(m.T[i, j] * m.Y[i, j] for j in m.J_i[i])
         m.TimeWindow = Constraint(m.I, rule=_timewindow_rule)
 
-        # Base completion lower bound for first jobs
+        # Base completion lower bound for first jobs. A first job on unit j cannot
+        # finish before its own initial setup + processing time; the InitChg term
+        # is zero unless i is the first job on j (and zero everywhere when no
+        # initial_changeover is supplied, preserving the original model).
         def _base_completion_lb(m, i):
-            return m.C[i] >= sum(m.T[i, j] * m.Y[i, j] for j in m.J_i[i])
+            return m.C[i] >= sum(
+                (m.T[i, j] * m.Y[i, j]) + (m.InitChg[i, j] * m.IsFirst[i, j])
+                for j in m.J_i[i]
+            )
         m.BaseCompletionLB = Constraint(m.I, rule=_base_completion_lb)
 
         # (3.1.6) lower timing with efficient M1 = DDATE[i]
@@ -278,9 +304,14 @@ class SingleStageIPMSolver(OptimizationSolver):
 
         # Objective
         if objective == "changeover":
+            # Total setup = inter-job changeovers + the initial setup of whichever
+            # job runs first on each used unit. The InitChg term is zero when no
+            # initial_changeover is given, so this reduces to the original
+            # inter-job-only objective for existing models.
             m.OBJ = Objective(
                 expr=sum(m.changeover[i, ip, j] * m.XX[i, ip, j]
-                         for i in I for ip in I if i != ip for j in J),
+                         for i in I for ip in I if i != ip for j in J)
+                     + sum(m.InitChg[i, j] * m.IsFirst[i, j] for i in I for j in J),
                 sense=minimize
             )
         else:  # "makespan" default

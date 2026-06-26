@@ -2,7 +2,6 @@
 from typing import Dict, Any, List, Optional, Tuple
 from .client import LLMClient
 from .ollama_client import OllamaClient
-from .groq_client import GroqClient
 from .transportation_specialist import TransportationSpecialist
 from .scheduling_specialist import SchedulingSpecialist
 from .problem_classifier import ProblemClassifier
@@ -10,42 +9,28 @@ from config import Config
 
 
 def _make_stage_client(stage: str):
-    """Return a per-stage chat client honoring Config.LLM_BACKEND.
+    """Return a per-stage Ollama chat client.
 
     stage ∈ {"classification", "extraction", "reasoning"}.
     """
-    backend = Config.LLM_BACKEND
-    if backend == "ollama":
-        model = {
-            "classification": Config.CLASSIFICATION_MODEL,
-            "extraction": Config.EXTRACTION_MODEL,
-            "reasoning": Config.REASONING_MODEL,
-        }[stage]
-        return OllamaClient(Config.OLLAMA_HOST, model)
-    if backend == "groq":
-        model = {
-            "classification": Config.GROQ_CLASSIFICATION_MODEL,
-            "extraction": Config.GROQ_EXTRACTION_MODEL,
-            "reasoning": Config.GROQ_REASONING_MODEL,
-        }[stage]
-        return GroqClient(model=model, api_key=Config.GROQ_API_KEY)
-    raise ValueError(
-        f"Unsupported LLM_BACKEND={backend!r}. Expected one of: ollama, groq."
-    )
+    model = {
+        "classification": Config.CLASSIFICATION_MODEL,
+        "extraction": Config.EXTRACTION_MODEL,
+        "reasoning": Config.REASONING_MODEL,
+    }[stage]
+    return OllamaClient(Config.OLLAMA_HOST, model)
 
 
 class EnhancedLLMClient(LLMClient):
     """
     Enhanced LLM client with multi-model pipeline.
 
-    Stage clients (classification / extraction / reasoning) are constructed from
-    Config.LLM_BACKEND. Use LLM_BACKEND=ollama (default) for local dev and
-    LLM_BACKEND=groq for hosted deployment.
+    Stage clients (classification / extraction / reasoning) are all Ollama-backed.
     """
 
     def __init__(self, host: str = None, model: str = None, knowledge_base=None):
         # host/model kwargs are accepted for backward compatibility but ignored —
-        # backend selection now flows entirely through Config.LLM_BACKEND.
+        # configuration flows entirely through Config (Ollama host + per-stage models).
         self.kb = knowledge_base
 
         # Stage A: Classification

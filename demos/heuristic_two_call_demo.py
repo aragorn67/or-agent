@@ -13,9 +13,9 @@ Flow:
        ANALYSIS.md), returns the proven-optimal answer + explanation
 
 Run prerequisites:
-    - Ollama up with qwen3:14b pulled
-    - API running with LLM_BACKEND=ollama on port 8765:
-        LLM_BACKEND=ollama uvicorn api:app --host 127.0.0.1 --port 8765
+    - Ollama up with qwen3:8b pulled
+    - API running on port 8765:
+        uvicorn api:app --host 127.0.0.1 --port 8765
 """
 
 import json
